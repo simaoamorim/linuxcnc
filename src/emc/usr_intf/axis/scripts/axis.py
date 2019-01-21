@@ -930,6 +930,15 @@ class LivePlotter:
         widgets.code_text.insert("end", codes)
         widgets.code_text.configure(state="disabled")
 
+        # disable jog radiobutton for extrajoints that are homed
+        # since control is transferred to joint.N.posthome-cmd
+        for jno in range(num_joints - self.stat.num_extrajoints, num_joints):
+            jname = tabs_manual+".joints.joint"+str(jno)
+            #print jno,num_joints,num_extrajoints,s.homed[jno],jname
+            if s.homed[jno]: state="disabled"
+            else:            state="normal"
+            root_window.call(jname,"configure","-state",state)
+
         user_live_update()
 
     def clear(self):
