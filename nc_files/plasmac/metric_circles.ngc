@@ -13,8 +13,8 @@ F#<_hal[plasmac.cut-feed-rate]> ; feed rate from cut parameters
 
 o100 repeat [#2]
   G0 X[#5+-#4*#1] Y[#5+0]
-  M3S1
-  G0z0
+  M3 $0 S1 (select plasma torch)
+  G0 z0
   G2 I[#4*#1]
   M5
   #4 = [#4+0.5]
