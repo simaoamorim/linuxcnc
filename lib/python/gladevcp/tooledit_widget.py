@@ -14,6 +14,7 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 
+from __future__ import print_function
 import sys, os, pango, linuxcnc, hashlib, glib
 datadir = os.path.abspath(os.path.dirname(__file__))
 KEYWORDS = ['S','T', 'P', 'X', 'Y', 'Z', 'A', 'B', 'C', 'U', 'V', 'W', 'D', 'I', 'J', 'Q', ';']
@@ -80,7 +81,7 @@ class ToolEdit(gtk.VBox):
         # toggle button useable
         renderer = self.wTree.get_object("cell_toggle1")
         renderer.set_property('activatable', True)
-        # make colums editable
+        # make columns editable
         self.tool_cell_list = "cell_tool#","cell_pos","cell_x","cell_y","cell_z","cell_a","cell_b","cell_c","cell_u","cell_v","cell_w","cell_d", \
                 "cell_front","cell_back","cell_orient","cell_comments"
         for col,name in enumerate(self.tool_cell_list):
@@ -221,7 +222,7 @@ class ToolEdit(gtk.VBox):
                 liststore.set_value(liststore.get_iter(pathlist[0]),0,1)
                 treeselection.select_path(pathlist[0])
         except:
-            print _("tooledit_widget error: cannot select tool number"),toolnumber
+            print(_("tooledit_widget error: cannot select tool number"),toolnumber)
 
     def add(self,widget,data=[1,0,0,'0','0','0','0','0','0','0','0','0','0','0','0','0',"comment"]):
         self.model.append(data)
@@ -240,7 +241,7 @@ class ToolEdit(gtk.VBox):
         self.model.clear()
         #print "toolfile:",self.toolfile
         if not os.path.exists(self.toolfile):
-            print _("Toolfile does not exist")
+            print(_("Toolfile does not exist"))
             return
         logfile = open(self.toolfile, "r").readlines()
         self.toolinfo = []
@@ -274,12 +275,12 @@ class ToolEdit(gtk.VBox):
                             try:
                                 array[offset]= int(word.lstrip(i))
                             except:
-                                print _("Tooledit widget int error")
+                                print(_("Tooledit widget int error"))
                         else:
                             try:
                                 array[offset]= locale.format("%10.4f", float(word.lstrip(i)))
                             except:
-                                print _("Tooledit_widget float error")
+                                print(_("Tooledit_widget float error"))
                         break
             if toolinfo_flag:
                 self.toolinfo = array
@@ -307,8 +308,8 @@ class ToolEdit(gtk.VBox):
                     test = i.lstrip() # localized floats
                     line = line + "%s%s "%(KEYWORDS[num], locale.atof(test))
 
-            print >>file,line
-        # Theses lines are required to make sure the OS doesn't cache the data
+            print(line, file=file)
+        # These lines are required to make sure the OS doesn't cache the data
         # That would make linuxcnc and the widget to be out of synch leading to odd errors
         file.flush()
         os.fsync(file.fileno())
@@ -316,7 +317,7 @@ class ToolEdit(gtk.VBox):
         try:
             linuxcnc.command().load_tool_table()
         except:
-            print _("Reloading tooltable into linuxcnc failed")
+            print(_("Reloading tooltable into linuxcnc failed"))
 
         # This is for changing the display after tool editor was loaded using the style button
         # note that it toggles the display
@@ -409,7 +410,7 @@ class ToolEdit(gtk.VBox):
             except:
                 pass
 
-        # depending what is editted add the right type of info integer,float or text
+        # depending what is edited add the right type of info integer,float or text
         # If it's a filtered display then we must convert the path 
     def col_editted(self, widget, path, new_text, col, filter):
         if filter == 'wear':
@@ -476,7 +477,7 @@ class ToolEdit(gtk.VBox):
 
         # you could overload this to do something else.
     def toolfile_stale(self):
-        print _("Tool file was modified since it was last read")
+        print(_("Tool file was modified since it was last read"))
         self.reload(None)
         self.set_selected_tool(self.toolinfo_num)
 
@@ -503,7 +504,7 @@ class ToolEdit(gtk.VBox):
         # standard Gobject method
     def do_get_property(self, property):
         name = property.name.replace('-', '_')
-        if name in self.__gproperties.keys():
+        if name in list(self.__gproperties.keys()):
             return getattr(self, name)
         else:
             raise AttributeError('unknown property %s' % property.name)
@@ -670,9 +671,9 @@ def main(filename=None):
     #tooledit.set_lathe_display(True)
     response = window.run()
     if response == gtk.RESPONSE_ACCEPT:
-       print "True"
+       print("True")
     else:
-       print "False"
+       print("False")
 
 if __name__ == "__main__":
     # if there are two arguments then specify the path

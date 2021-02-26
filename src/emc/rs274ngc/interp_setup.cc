@@ -17,7 +17,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-#ifndef BOOST_PYTHON_NAX_ARITY
+#ifndef BOOST_PYTHON_MAX_ARITY
 #define BOOST_PYTHON_MAX_ARITY 4
 #endif
 #include <string.h>
@@ -131,7 +131,6 @@ setup::setup() :
     stack{},
     stack_index(0),
     tool_offset{{0,0,0},0,0,0,0,0,0},
-    pockets_max(0),
     tool_table{},
     traverse_rate (0.0),
     orient_offset (0.0),

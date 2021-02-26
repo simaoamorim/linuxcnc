@@ -16,7 +16,7 @@ def reparent(window, parent):
     if not parent:
         return window
 
-    plug = gtk.Plug(long(parent))
+    plug = gtk.Plug(int(parent))
     plug.show()
 
     d = display.Display()
@@ -41,7 +41,7 @@ def add_plug(window):
     """Replace top level with a plug so it can be reparented.
     This doesn't actually reparent the widget
     """
-    plug = gtk.Plug(0l)
+    plug = gtk.Plug(0)
     plug.show()
     for c in window.get_children():
         window.remove(c)
@@ -56,8 +56,8 @@ def keyboard_forward(window, forward):
         This is kind of hack needed to properly function inside Tk windows.
         Gtk app will receive _all_ events, even not needed. So we have to forward
         back things that left over after our widgets. Connect handlers _after_
-        all others and listen for key-presss and key-release events. If key is not
-        in ignore list - forward it to window id found in evironment.
+        all others and listen for key-press and key-release events. If key is not
+        in ignore list - forward it to window id found in environment.
     """
     if not forward:
         return

@@ -59,6 +59,8 @@
 #include <libintl.h>
 #include <locale.h>
 #include "usrmotintf.h"
+#include <rtapi_string.h>
+#include "tooldata.hh"
 
 #if 0
 // Enable this to niftily trap floating point exceptions for debugging
@@ -1062,7 +1064,7 @@ static int emcTaskPlan(void)
 
 		case EMC_TASK_PLAN_STEP_TYPE:
 		    // handles case where first action is to step the program
-		    taskPlanRunCmd.line = 1;	// run from start
+		    taskPlanRunCmd.line = 0;	// run from start
 		    /*! \todo FIXME-- can have GUI set this; send a run instead of a 
 		       step */
 		    retval = emcTaskIssueCommand(&taskPlanRunCmd);
@@ -1819,6 +1821,7 @@ static int emcTaskIssueCommand(NMLmsg * cmd)
 	break;
 
     case EMC_TRAJ_LINEAR_MOVE_TYPE:
+	emcTrajUpdateTag(((EMC_TRAJ_LINEAR_MOVE *) cmd)->tag);
 	emcTrajLinearMoveMsg = (EMC_TRAJ_LINEAR_MOVE *) cmd;
         retval = emcTrajLinearMove(emcTrajLinearMoveMsg->end,
                                    emcTrajLinearMoveMsg->type, emcTrajLinearMoveMsg->vel,
@@ -1827,6 +1830,7 @@ static int emcTaskIssueCommand(NMLmsg * cmd)
 	break;
 
     case EMC_TRAJ_CIRCULAR_MOVE_TYPE:
+	emcTrajUpdateTag(((EMC_TRAJ_LINEAR_MOVE *) cmd)->tag);
 	emcTrajCircularMoveMsg = (EMC_TRAJ_CIRCULAR_MOVE *) cmd;
         retval = emcTrajCircularMove(emcTrajCircularMoveMsg->end,
                 emcTrajCircularMoveMsg->center, emcTrajCircularMoveMsg->normal,
@@ -1924,6 +1928,7 @@ static int emcTaskIssueCommand(NMLmsg * cmd)
 	break;
 
     case EMC_TRAJ_RIGID_TAP_TYPE:
+	emcTrajUpdateTag(((EMC_TRAJ_LINEAR_MOVE *) cmd)->tag);
 	retval = emcTrajRigidTap(((EMC_TRAJ_RIGID_TAP *) cmd)->pos,
 	        ((EMC_TRAJ_RIGID_TAP *) cmd)->vel,
         	((EMC_TRAJ_RIGID_TAP *) cmd)->ini_maxvel,  
@@ -2045,7 +2050,7 @@ static int emcTaskIssueCommand(NMLmsg * cmd)
 
     case EMC_TOOL_PREPARE_TYPE:
 	tool_prepare_msg = (EMC_TOOL_PREPARE *) cmd;
-	retval = emcToolPrepare(tool_prepare_msg->pocket,tool_prepare_msg->tool);
+	retval = emcToolPrepare(tool_prepare_msg->tool);
 	break;
 
     case EMC_TOOL_START_CHANGE_TYPE:
@@ -2090,6 +2095,11 @@ static int emcTaskIssueCommand(NMLmsg * cmd)
     case EMC_TASK_ABORT_TYPE:
 	// abort everything
 	emcTaskAbort();
+	// KLUDGE call motion abort before state restore to make absolutely sure no
+	// stray restore commands make it down to motion
+	emcMotionAbort();
+	// Then call state restore to update the interpreter
+	emcTaskStateRestore();
         emcIoAbort(EMC_ABORT_TASK_ABORT);
     for (int s = 0; s < emcStatus->motion.traj.spindles; s++) emcSpindleAbort(s);
 	mdi_execute_abort();
@@ -2173,7 +2183,7 @@ static int emcTaskIssueCommand(NMLmsg * cmd)
 	if (-1 == retval) {
 	    emcOperatorError(0, _("can't open %s"), open_msg->file);
 	} else {
-	    strcpy(emcStatus->task.file, open_msg->file);
+	    rtapi_strxcpy(emcStatus->task.file, open_msg->file);
 	    retval = 0;
 	}
 	break;
@@ -2202,7 +2212,7 @@ static int emcTaskIssueCommand(NMLmsg * cmd)
 		command = NULL;
 	    } else {
 		// record initial MDI command
-		strcpy(emcStatus->task.command, execute_msg->command);
+		rtapi_strxcpy(emcStatus->task.command, execute_msg->command);
 	    }
 
 	    int level = emcTaskPlanLevel();
@@ -2553,6 +2563,7 @@ static int emcTaskExecute(void)
 	{
 	    int was_open = taskplanopen;
 	    emcTaskPlanClose();
+            emcTaskPlanReset();  // Flush any unflushed segments
 	    if (emc_debug & EMC_DEBUG_INTERP && was_open) {
 		rcs_print("emcTaskPlanClose() called at %s:%d\n", __FILE__,
 			  __LINE__);
@@ -3163,7 +3174,7 @@ static int iniLoad(const char *filename)
 
     if (NULL != (inistring = inifile.Find("NML_FILE", "EMC"))) {
 	// copy to global
-	strcpy(emc_nmlfile, inistring);
+	rtapi_strxcpy(emc_nmlfile, inistring);
     } else {
 	// not found, use default
     }
@@ -3181,13 +3192,13 @@ static int iniLoad(const char *filename)
 
     if (NULL != (inistring = inifile.Find("RS274NGC_STARTUP_CODE", "RS274NGC"))) {
 	// copy to global
-	strcpy(rs274ngc_startup_code, inistring);
+	rtapi_strxcpy(rs274ngc_startup_code, inistring);
     } else {
 	//FIXME-AJ: this is the old (unpreferred) location. just for compatibility purposes
 	//it will be dropped in v2.4
 	if (NULL != (inistring = inifile.Find("RS274NGC_STARTUP_CODE", "EMC"))) {
 	    // copy to global
-	    strcpy(rs274ngc_startup_code, inistring);
+	    rtapi_strxcpy(rs274ngc_startup_code, inistring);
 	} else {
 	// not found, use default
 	}
@@ -3312,6 +3323,12 @@ int main(int argc, char *argv[])
     // moved up from emc_startup so we can expose it in Python right away
     emcStatus = new EMC_STAT;
 
+#ifdef TOOL_NML //{
+    tool_nml_register( (CANON_TOOL_TABLE*)&emcStatus->io.tool.toolTable);
+#else //}{
+    tool_mmap_user();
+    // initialize database tool finder:
+#endif //}
     // get the Python plugin going
 
     // inistantiate task methods object, too
@@ -3474,6 +3491,7 @@ int main(int argc, char *argv[])
 	    {
 		int was_open = taskplanopen;
 		emcTaskPlanClose();
+                emcTaskPlanReset();  // Flush any unflushed segments
 		if (emc_debug & EMC_DEBUG_INTERP && was_open) {
 		    rcs_print("emcTaskPlanClose() called at %s:%d\n",
 			      __FILE__, __LINE__);
@@ -3549,11 +3567,13 @@ int main(int argc, char *argv[])
         else if (deltaTime > maxTime)
             maxTime = deltaTime;
         startTime = endTime;
-        if (deltaTime > (latency_excursion_factor * emc_task_cycle_time)) {
-            if (num_latency_warnings < 10) {
-                rcs_print("task: main loop took %.6f seconds\n", deltaTime);
+        if (!getenv( (char*)"QUIET_TASK") ) {
+            if (deltaTime > (latency_excursion_factor * emc_task_cycle_time)) {
+                if (num_latency_warnings < 10) {
+                    rcs_print("task: main loop took %.6f seconds\n", deltaTime);
+                }
+                num_latency_warnings ++;
             }
-            num_latency_warnings ++;
         }
 
 	if ((emcTaskNoDelay) || (emcTaskEager)) {

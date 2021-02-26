@@ -65,6 +65,7 @@
 #include <gtk/gtk.h>
 #include "miscgtk.h"		/* generic GTK stuff */
 #include <gdk/gdkkeysyms.h>
+#include <rtapi_string.h>
 
 /***********************************************************************
 *                            TYPEDEFS                                  *
@@ -172,7 +173,7 @@ int main(int argc, gchar * argv[])
             yposition =  atoi(argv[n]);
             n++;
             if ( argc > n ){
-                strcpy(buf,argv[n]);
+                rtapi_strxcpy(buf,argv[n]);
                 for (i=0; i< strlen(argv[n]); i++) {
                     if (isdigit(buf[i]) == 0) { break; } 
                 }
@@ -764,7 +765,7 @@ static gboolean key_press(GtkWidget *clist, GdkEventKey *event, gpointer user_da
         while (data_good != 0) {
             key = (gdk_keyval_name (event->keyval));
             data_good = gtk_clist_get_text(GTK_CLIST(clist), row, 0, &name );
-            printf("check: %s %c\n",key,name[0]);
+            // printf("check: %s %c\n",key,name[0]);
 
             /* is keypress same as first letter of name? */
             if (*key == name[0]) {

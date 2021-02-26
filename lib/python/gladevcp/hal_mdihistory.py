@@ -19,10 +19,10 @@ import pango
 
 import gobject, gtk
 
-from hal_widgets import _HalWidgetBase
+from .hal_widgets import _HalWidgetBase
 import linuxcnc
 from hal_glib import GStat
-from hal_actions import _EMC_ActionBase, ensure_mode
+from .hal_actions import _EMC_ActionBase, ensure_mode
 # path to TCL for external programs eg. halshow
 try:
     TCLPATH = os.environ['LINUXCNC_TCL_DIR']
@@ -33,7 +33,7 @@ class EMC_MDIHistory(gtk.VBox, _EMC_ActionBase):
     '''
     EMC_MDIHistory will store each MDI command to a file on your hard drive
     and display the grabbed commands in a treeview so they can be used again
-    without typing the complete comand again
+    without typing the complete command again
     '''
 
     __gtype_name__ = 'EMC_MDIHistory'

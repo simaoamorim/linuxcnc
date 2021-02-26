@@ -6,9 +6,12 @@ import os
 import linuxcnc
 
 from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtGui import QColor
 
 from qtvcp.widgets.mdi_line import MDILine as MDI_WIDGET
 from qtvcp.widgets.gcode_editor import GcodeEditor as GCODE
+from qtvcp.widgets.status_label import StatusLabel as TOOLSTAT
+from qtvcp.widgets.state_led import StateLED as LED
 from qtvcp.lib.keybindings import Keylookup
 from qtvcp.lib.toolbar_actions import ToolBarActions
 from qtvcp.widgets.stylesheeteditor import  StyleSheetEditor as SSE
@@ -93,6 +96,7 @@ class HandlerClass:
         TOOLBAR.configure_submenu(self.w.menuHoming, 'home_submenu')
         TOOLBAR.configure_submenu(self.w.menuUnhome, 'unhome_submenu')
         TOOLBAR.configure_submenu(self.w.menuZeroCoordinateSystem, 'zero_systems_submenu')
+        TOOLBAR.configure_submenu(self.w.menuGridSize, 'grid_size_submenu')
         TOOLBAR.configure_action(self.w.actionEstop, 'estop')
         TOOLBAR.configure_action(self.w.actionMachineOn, 'power')
         TOOLBAR.configure_action(self.w.actionOpen, 'load')
@@ -104,10 +108,16 @@ class HandlerClass:
         TOOLBAR.configure_action(self.w.actionOptionalStop, 'optional_stop')
         TOOLBAR.configure_action(self.w.actionZoomIn, 'zoom_in')
         TOOLBAR.configure_action(self.w.actionZoomOut, 'zoom_out')
-        TOOLBAR.configure_action(self.w.actionFrontView, 'view_x')
-        TOOLBAR.configure_action(self.w.actionSideView, 'view_y')
-        TOOLBAR.configure_action(self.w.actionRotatedView, 'view_z2')
-        TOOLBAR.configure_action(self.w.actionTopView, 'view_z')
+        if not INFO.MACHINE_IS_LATHE:
+            TOOLBAR.configure_action(self.w.actionFrontView, 'view_x')
+            TOOLBAR.configure_action(self.w.actionRotatedView, 'view_z2')
+            TOOLBAR.configure_action(self.w.actionSideView, 'view_y')
+            TOOLBAR.configure_action(self.w.actionTopView, 'view_z')
+        else:
+            self.w.actionFrontView.setVisible(False)
+            self.w.actionTopView.setVisible(False)
+            TOOLBAR.configure_action(self.w.actionSideView, 'view_y')
+            TOOLBAR.configure_action(self.w.actionRotatedView, 'view_y2')
         TOOLBAR.configure_action(self.w.actionPerspectiveView, 'view_p')
         TOOLBAR.configure_action(self.w.actionClearPlot, 'view_clear')
         TOOLBAR.configure_action(self.w.actionShowOffsets, 'show_offsets')
@@ -127,14 +137,22 @@ class HandlerClass:
         TOOLBAR.configure_action(self.w.actionToolOffsetDialog, 'tooloffsetdialog')
         TOOLBAR.configure_action(self.w.actionOriginOffsetDialog, 'originoffsetdialog')
         TOOLBAR.configure_action(self.w.actionCalculatorDialog, 'calculatordialog')
+        TOOLBAR.configure_action(self.w.actionAlphaMode, 'alpha_mode')
+        TOOLBAR.configure_action(self.w.actionInhibitSelection, 'inhibit_selection')
+        TOOLBAR.configure_action(self.w.actionShow_G53_in_DRO,'', self.g53_in_dro_changed)
+        TOOLBAR.configure_statusbar(self.w.statusbar,'message_controls')
+        TOOLBAR.configure_action(self.w.actionVersaProbe,'', self.launch_versa_probe)
         self.w.actionQuickRef.triggered.connect(self.quick_reference)
         self.w.actionMachineLog.triggered.connect(self.launch_log_dialog)
         if not INFO.HOME_ALL_FLAG:
             self.w.actionButton_home.setText("Home Selected")
             self.w.actionButton_home.set_home_select(True)
-        self.w.rpm_bar = QtWidgets.QProgressBar()
-        self.w.rpm_bar.setRange(0, INFO.MAX_SPINDLE_SPEED)
-        self.w.rightTab.setCornerWidget(self.w.rpm_bar)
+        self.make_corner_widgets()
+        self.make_progressbar()
+
+        if INFO.MACHINE_IS_LATHE:
+            self.w.dro_relative_y.setVisible(False)
+            self.w.dro_absolute_y.setVisible(False)
 
     def processed_key_event__(self,receiver,event,is_pressed,key,code,shift,cntrl):
         # when typing in MDI, we don't want keybinding to call functions
@@ -175,17 +193,12 @@ class HandlerClass:
                     event.accept()
                     return True
 
-        # ok if we got here then try keybindings
-        try:
-            b = KEYBIND.call(self,event,is_pressed,shift,cntrl)
-            event.accept()
-            return True
-        except NameError as e:
-            LOG.debug('Exception in KEYBINDING: {}'.format (e))
-        except Exception as e:
-            LOG.debug('Exception in KEYBINDING:', exc_info=e)
-            print 'Error in, or no function for: %s in handler file for-%s'%(KEYBIND.convert(event),key)
-            return False
+        if event.isAutoRepeat():return True
+
+        # ok if we got here then try keybindings function calls
+        # KEYBINDING will call functions from handler file as
+        # registered by KEYBIND.add_call(KEY,FUNCTION) above
+        return KEYBIND.manage_function_calls(self,event,is_pressed,key,shift,cntrl)
 
     def closing_cleanup__(self):
         TOOLBAR.saveRecentPaths()
@@ -207,10 +220,6 @@ class HandlerClass:
             ACTION.UPDATE_MACHINE_LOG('Set tool offset of Axis %s to %f' %(axis, num), 'TIME')
 
     def motion_mode(self, w, mode):
-        #print STATUS.stat.joints
-        #print STATUS.stat.kinematics_type
-        #print INFO.AVAILABLE_AXES
-        #print INFO.GET_NAME_FROM_JOINT
         if mode == linuxcnc.TRAJ_MODE_COORD:
             pass
         # Joint mode
@@ -234,6 +243,22 @@ class HandlerClass:
     def leftTabChanged(self, num):
         if num == 0:
             ACTION.SET_MANUAL_MODE()
+
+    def percentLoaded(self, fraction):
+        if fraction <0:
+            self.w.progressbar.setValue(0)
+            self.w.progressbar.setFormat('Progress')
+        else:
+            self.w.progressbar.setValue(fraction)
+            self.w.progressbar.setFormat('Loading: {}%'.format(fraction))
+
+    def percentCompleted(self, fraction):
+        self.w.progressbar.setValue(fraction)
+        if fraction <0:
+            self.w.progressbar.setValue(0)
+            self.w.progressbar.setFormat('Progress')
+        else:
+            self.w.progressbar.setFormat('Completed: {}%'.format(fraction))
 
     #####################
     # general functions #
@@ -260,6 +285,9 @@ class HandlerClass:
                 self.w['ras_label_%s'%i].show()
                 self.w['ras_%s'%i].show()
                 self.w['ras_label_%s'%i].setText('%s'%j)
+                # lathes need adjustment
+                self.w['ras_%s'%i].setProperty('axis_selection',j)
+                self.w['ras_%s'%i].setProperty('joint_selection',i)
                 try:
                     self.w['machine_label_j%d'%i].setText('<html><head/><body><p><span style=" font-size:20pt; font-weight:600;">Machine %s:</span></p></body></html>' %j)
                 except:
@@ -275,6 +303,9 @@ class HandlerClass:
             self.w['dro_label_g5x_%s'%i].imperial_template = unit + i.upper() + '%9.4f'
             self.w['dro_label_g5x_%s'%i].metric_template = unit + i.upper() + '%10.3f'
             self.w['dro_label_g5x_%s'%i].update_units()
+            self.w['dro_label_g53_%s'%i].imperial_template = i.upper() + '%9.4f'
+            self.w['dro_label_g53_%s'%i].metric_template = i.upper() + '%10.3f'
+            self.w['dro_label_g53_%s'%i].update_units()
         self.w.dro_label_g5x_r.angular_template = unit + 'R      %3.2f'
         self.w.dro_label_g5x_r.update_units()
         self.w.dro_label_g5x_r.update_rotation(None, STATUS.stat.rotation_xy)
@@ -372,7 +403,7 @@ class HandlerClass:
     (_("Ctrl-Space"), _("Clear notifications")),
     (_("Alt-F, M, V"), _("Open a Menu")),
 ]
-        help =  zip(help1,help2)
+        help =  list(zip(help1,help2))
         msg = QtWidgets.QDialog()
         msg.setWindowTitle("Quick Reference")
         button = QtWidgets.QPushButton("Ok")
@@ -419,6 +450,55 @@ class HandlerClass:
         else:
             ACTION.JOG(joint, 0, 0, 0)
 
+    # add spindle speed bar and at-speed led to tab corner
+    # add a tool number to tab corner
+    def make_corner_widgets(self):
+        # make a spindle-at-speed green LED
+        self.w.led = LED()
+        self.w.led.setProperty('is_spindle_at_speed_status',True)
+        self.w.led.setProperty('color',QColor(0,255,0,255))
+        self.w.led.hal_init(HAL_NAME = 'spindle_is_at_speed')
+
+        # make a spindle speed bar
+        self.w.rpm_bar = QtWidgets.QProgressBar()
+        self.w.rpm_bar.setRange(0, INFO.MAX_SPINDLE_SPEED)
+
+        # containers
+        w = QtWidgets.QWidget()
+        w.setContentsMargins(0,0,0,6)
+        w.setMinimumHeight(40)
+
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(self.w.rpm_bar)
+        hbox.addWidget(self.w.led)
+        w.setLayout(hbox)
+
+        # add those to the corner of the right tab widget
+        self.w.rightTab.setCornerWidget(w)
+
+        # add tool number status to left tab corner
+        self.w.tool_stat = TOOLSTAT()
+        self.w.tool_stat.setProperty('tool_number_status', True)
+        self.w.tool_stat.setProperty('textTemplate', 'Tool %d')
+        self.w.tool_stat.hal_init()
+        self.w.tool_stat.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        self.w.tool_stat.setFixedWidth(60)
+        self.w.leftTab.setCornerWidget(self.w.tool_stat)
+
+    def make_progressbar(self):
+        self.w.progressbar = QtWidgets.QProgressBar()
+        self.w.progressbar.setRange(0,100)
+        self.w.statusbar.addWidget(self.w.progressbar)
+
+    def g53_in_dro_changed(self, w, data):
+        if data:
+            self.w.widget_dro_g53.show()
+        else:
+            self.w.widget_dro_g53.hide()
+
+    def launch_versa_probe(self, w):
+        STATUS.emit('dialog-request',{'NAME':'VERSAPROBE'})
+
     #####################
     # KEY BINDING CALLS #
     #####################
@@ -451,15 +531,21 @@ class HandlerClass:
         self.kb_jog(state, 0, -1, shift)
 
     def on_keycall_YPOS(self,event,state,shift,cntrl):
-        self.kb_jog(state, 1, 1, shift)
+        j = 1
+        if INFO.MACHINE_IS_LATHE:
+            j = INFO.GET_AXIS_INDEX_FROM_JOINT_NUM[INFO.GET_JOG_FROM_NAME['Z']]
+        self.kb_jog(state, j, 1, shift)
 
     def on_keycall_YNEG(self,event,state,shift,cntrl):
-        self.kb_jog(state, 1, -1, shift)
+        j = INFO.GET_AXIS_INDEX_FROM_JOINT_NUM[INFO.GET_JOG_FROM_NAME['Z']]
+        self.kb_jog(state, j, -1, shift)
 
     def on_keycall_ZPOS(self,event,state,shift,cntrl):
+        if INFO.MACHINE_IS_LATHE: return
         self.kb_jog(state, 2, 1, shift)
 
     def on_keycall_ZNEG(self,event,state,shift,cntrl):
+        if INFO.MACHINE_IS_LATHE: return
         self.kb_jog(state, 2, -1, shift)
 
     def on_keycall_APOS(self,event,state,shift,cntrl):

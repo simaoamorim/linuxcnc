@@ -61,7 +61,7 @@ class HandlerClass:
     # the HAL pins are built but HAL is not set ready
     def initialized__(self):
         if self.w.PREFS_:
-            print 'Using preference file:',self.w.PREFS_.fn
+            print('Using preference file:',self.w.PREFS_.fn)
         ACTION.SPEAK('This is a test screen for Qt V C P')
         # add some extra key bindings
         KEYBIND.add_call('Key_F3','on_keycall_F3')
@@ -110,16 +110,12 @@ class HandlerClass:
                     event.accept()
                     return True
 
-        # ok if we got here then try keybindings
-        try:
-            return KEYBIND.call(self,event,is_pressed,shift,cntrl)
-        except NameError as e:
-            LOG.debug('Exception in KEYBINDING: {}'.format (e))
-        except Exception as e:
-            LOG.debug('Exception in KEYBINDING:', exc_info=e)
-            print 'Error in, or no function for: %s in handler file for-%s'%(KEYBIND.convert(event),key)
-            return False
+        if event.isAutoRepeat():return True
 
+        # ok if we got here then try keybindings function calls
+        # KEYBINDING will call functions from handler file as
+        # registered by KEYBIND.add_call(KEY,FUNCTION) above
+        return KEYBIND.manage_function_calls(self,event,is_pressed,key,shift,cntrl)
 
     ########################
     # callbacks from STATUS #
@@ -168,11 +164,11 @@ class HandlerClass:
                 ACTION.SET_MACHINE_HOMING(-1)
     def on_keycall_ABORT(self,event,state,shift,cntrl):
         if state:
-            print 'abort'
+            print('abort')
             if STATUS.stat.interp_state == linuxcnc.INTERP_IDLE:
                 self.w.close()
             else:
-                print 'abort'
+                print('abort')
                 self.cmnd.abort()
 
     # dialogs

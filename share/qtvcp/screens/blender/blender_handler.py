@@ -53,7 +53,7 @@ class HandlerClass:
     # the widgets are instantiated.
     # the HAL pins are built but HAL is not set ready
     def initialized__(self):
-        print self.PATHS.IMAGEDIR
+        print(self.PATHS.IMAGEDIR)
         self.w.imageswitcher.set_default_image((os.path.join(self.PATHS.IMAGEDIR,'unknown_tool.png')) or '')
         STATUS.emit('play-sound','SPEAK This is the blender screen for Qt V C P')
         STATUS.connect('tool-prep-changed', lambda w, data: self.change_tool_image(data))
@@ -98,15 +98,12 @@ class HandlerClass:
                     event.accept()
                     return True
 
-        # ok if we got here then try keybindings
-        try:
-            return KEYBIND.call(self,event,is_pressed,shift,cntrl)
-        except NameError as e:
-            LOG.debug('Exception in KEYBINDING: {}'.format (e))
-        except Exception as e:
-            LOG.debug('Exception in KEYBINDING:', exc_info=e)
-            print 'Error in, or no function for: %s in handler file for-%s'%(KEYBIND.convert(event),key)
-            return False
+        if event.isAutoRepeat():return True
+
+        # ok if we got here then try keybindings function calls
+        # KEYBINDING will call functions from handler file as
+        # registered by KEYBIND.add_call(KEY,FUNCTION) above
+        return KEYBIND.manage_function_calls(self,event,is_pressed,key,shift,cntrl)
 
     ########################
     # callbacks from STATUS #

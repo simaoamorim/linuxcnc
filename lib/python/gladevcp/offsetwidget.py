@@ -54,7 +54,7 @@ class HAL_Offset(gtk.Label):
         self.display_units_mm=0
         self.machine_units_mm=0
         self.unit_convert=[1]*9
-        # The update time: every 500 milliseonds
+        # The update time: every 500 milliseconds
         gobject.timeout_add(500, self.periodic)
 
         # check the ini file if UNITS are set to mm
@@ -80,7 +80,7 @@ class HAL_Offset(gtk.Label):
     # A user can use this too using goobject 
     def do_get_property(self, property):
         name = property.name.replace('-', '_')
-        if name in self.__gproperties.keys():
+        if name in list(self.__gproperties.keys()):
             return getattr(self, name)
         else:
             raise AttributeError('unknown property %s' % property.name)
@@ -91,10 +91,10 @@ class HAL_Offset(gtk.Label):
         if name in ('mm_text_template','imperial_text_template'):
             try:
                 v = value % 0.0
-            except Exception, e:
-                print "Invalid format string '%s': %s" % (value, e)
+            except Exception as e:
+                print("Invalid format string '%s': %s" % (value, e))
                 return False
-        if name in self.__gproperties.keys():
+        if name in list(self.__gproperties.keys()):
             setattr(self, name, value)
             self.queue_draw()
         else:
@@ -143,7 +143,7 @@ class HAL_Offset(gtk.Label):
     # it just mutiplies the two arrays 
     def convert_units(self,v):
         c = self.conversion
-        return map(lambda x,y: x*y, v, c)
+        return list(map(lambda x,y: x*y, v, c))
 
     # helper function to set the units to inch
     def set_to_inch(self):
@@ -167,11 +167,11 @@ def main():
     window.show_all()
     response = window.run()
     if response == gtk.RESPONSE_ACCEPT:
-       print "ok"
+       print("ok")
     else:
-       print "cancel"
+       print("cancel")
 
-if __name__ == "__main__":	
+if __name__ == "__main__":
     main()
 
 

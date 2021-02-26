@@ -64,6 +64,7 @@ class Private_Data:
         self._TKLINUXCNC = 2
         self._GMOCCAPY = 3
         self._TOUCHY = 4
+        self._QTDRAGON = 5
 
         self._SSCOMBOLEN = 60
         self._IMPERIAL = 0
@@ -374,7 +375,7 @@ class Private_Data:
             S.I7I70_T, S.I7I70_R, S.I7I70_E, S.I7I71_T, S.I7I71_R, S.I7I71_E, 
             S.I7I76_M0_T, S.I7I76_M0_R, S.I7I76_M0_E, S.I7I76_M2_T, S.I7I76_M2_R, S.I7I76_M2_E,
             S.I7I77_M0_T, S.I7I77_M0_R, S.I7I77_M0_E, S.I7I77_M3_T, S.I7I77_M3_R, S.I7I77_M3_E,
-            S.I7I73_M0_T, S.I7I73_M0_R, S.I7I73_M0_E, S.I7I84_M0_T, S.I7I84_M0_R, S.I7I84_M0_E,
+            S.I7I73_M1_T, S.I7I73_M1_R, S.I7I73_M1_E, S.I7I84_M0_T, S.I7I84_M0_R, S.I7I84_M0_E,
             S.I7I84_M3_T, S.I7I84_M3_R, S.I7I84_M3_E,
         ) = self.hal_sserial_names = [
             "unused-sserial","8i20-t","8i20-r","8i20-e",
@@ -731,6 +732,15 @@ class Private_Data:
         [S.SS7I76M3,0],[S.RXDATA3,0],[S.TXDATA4,0],[S.RXDATA4,0],[S.ENCI,0],[S.ENCB,0],[S.ENCA,0],
         [S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],],
 
+   ['7i92-Internal Data', '7i92', 'G540x2', '7i92', 'hm2_eth', 2,3, 0,0, 2,1, 0,0, 10,2, 0,0, [],0,0,0,0,0,0,0, 1, 34, 33, 200,[2, 1],
+        # TAB 2
+        [S.GPIOI, 0],[S.PWMP, 0],[S.STEPA, 0],[S.GPIOI, 0],[S.STEPB, 0],[S.STEPA, 4],[S.STEPA, 1],[S.GPIOI, 0],[S.STEPB, 1],[S.STEPA, 2],
+        [S.STEPB, 2],[S.STEPA, 3],[S.STEPB, 3],[S.ENCA, 0],[S.ENCB, 0],[S.ENCI, 0],[S.GPIOI, 0],
+        [S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],
+        # TAB 1
+        [S.GPIOI, 0],[S.PWMP, 1],[S.STEPA, 5],[S.GPIOI, 0],[S.STEPB, 5],[S.STEPA, 9],[S.STEPA, 6],[S.GPIOI, 0],[S.STEPB, 6],[S.STEPA, 7],
+        [S.STEPB, 7],[S.STEPA, 8],[S.STEPB, 8],[S.ENCA, 1],[S.ENCB, 1],[S.ENCI, 1],[S.GPIOI, 0],
+        [S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],[S.NUSED, 0],],
 
 
     ["7i93-Internal Data", "7i93", "justio", "7i93", "hm2_eth",
@@ -772,14 +782,14 @@ class Private_Data:
 
     # 7i96 ####################
     ['7i96-Internal Data', '7i96', '7i96d', '7i96', 'hm2_eth',
-        1,3, 0,0, 0,3, 0,0, 5,2, 1,2, [],0,0,0,0,0,0,0, 1, 34, 33, 200, [1, 2, 3],
+        1,3, 0,0, 0,3, 0,0, 5,2, 1,1, [],0,0,0,0,0,0,0, 1, 34, 33, 200, [1, 2, 3],
         # TAB 1
         [S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],
         [S.GPIOI, 0],[S.SSR0, 100],[S.SSR0, 101],[S.SSR0, 102],[S.SSR0, 103],[S.SSR0, 104],[S.SSR0, 105],
         [S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],
         # TAB 2
         [S.STEPB,0],[S.STEPA,0],[S.STEPB,1],[S.STEPA,1],[S.STEPB,2],[S.STEPA,2],[S.STEPB,3],[S.STEPA,3],[S.STEPB,4],[S.STEPA,4],
-        [S.ENCA,0],[S.ENCB,0],[S.ENCI,0],[S.RXDATA0,0],[S.TXDATA1,0],[S.TXEN0,0],[S.NUSED,0],
+        [S.ENCA,0],[S.ENCB,0],[S.ENCI,0],[S.RXDATA0,0],[S.TXDATA0,0],[S.TXEN0,0],[S.NUSED,0],
         [S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],[S.NUSED,0],
         # TAB 3
         [S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],[S.GPIOI, 0],
@@ -994,7 +1004,8 @@ class Private_Data:
         self.MESS_NO_ESTOP = _("You need to designate an E-stop input pin in the Parallel Port Setup page for this program.")
         self.MESS_PYVCP_REWRITE =_("OK to replace existing custom pyvcp panel and custom_postgui.hal file ?\nExisting custompanel.xml and custom_postgui.hal will be renamed custompanel_backup.xml and postgui_backup.hal.\nAny existing file named custompanel_backup.xml and custom_postgui.hal will be lost. ")
         self.MESS_ABORT = _("Quit PNCconf and discard changes?")
-        self.MESS_QUIT = _("The configuration has been built and saved.\nDo you want to quit?")
+        self.MESS_QUIT = _("Do you want to quit?")
+        self.MESS_FINISH_QUIT = _("The configuration has been built and saved.\nDo you want to quit?")
         self.MESS_NO_REALTIME = _("You are using a simulated-realtime version of LinuxCNC, so testing / tuning of hardware is unavailable.")
         self.MESS_KERNEL_WRONG = _("You are using a realtime version of LinuxCNC but didn't load a realtime kernel so testing / tuning of hardware is\
                  unavailable.\nThis is possibly because you updated the OS and it doesn't automatically load the RTAI kernel anymore.\n"+

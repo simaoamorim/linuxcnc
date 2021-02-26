@@ -18,11 +18,11 @@ import os, time
 
 import gobject, gtk
 
-from hal_widgets import _HalWidgetBase
+from .hal_widgets import _HalWidgetBase
 import linuxcnc
 from hal_glib import GStat
-from hal_actions import _EMC_ActionBase, _EMC_Action
-from hal_filechooser import _EMC_FileChooser
+from .hal_actions import _EMC_ActionBase, _EMC_Action
+from .hal_filechooser import _EMC_FileChooser
 
 import gtksourceview2 as gtksourceview
 
@@ -96,7 +96,7 @@ class EMC_SourceView(gtksourceview.View, _EMC_ActionBase):
             self.gstat.connect('interp_idle', lambda w: self.set_line_number(0))
 
     def set_language(self, lang, path = None):
-        # path = the search path for the langauage file
+        # path = the search path for the language file
         # if none, set to default
         # lang = the lang file to set
         if path == None:
@@ -117,8 +117,8 @@ class EMC_SourceView(gtksourceview.View, _EMC_ActionBase):
     # This load the file while not allowing undo buttons to unload the program.
     # It updates the iter because iters become invalid when anything changes.
     # We set the buffer-unmodified flag false after loading the file.
-    # Set the hilight line to the line linuxcnc is looking at.
-    # if one calls load_file without a filenname, We reload the exisiting file.
+    # Set the highlight line to the line linuxcnc is looking at.
+    # if one calls load_file without a filename, We reload the existing file.
     def load_file(self, fn=None):
         self.buf.begin_not_undoable_action()
         if fn == None:
@@ -222,7 +222,7 @@ class EMC_SourceView(gtksourceview.View, _EMC_ActionBase):
                 self.current_iter = self.end_iter.copy()
             found = gtksourceview.iter_backward_search(self.current_iter,text,CASEFLAG, None)
         if found:
-            # erase any existing hilighting tags
+            # erase any existing highlighting tags
             try:
                 self.buf.remove_tag(self.found_text_tag, self.match_start, self.match_end)
             except:
@@ -271,7 +271,7 @@ class EMC_SourceView(gtksourceview.View, _EMC_ActionBase):
         if self.buf.can_redo():
             self.buf.redo()
 
-def safe_write(filename, data, mode=0644):
+def safe_write(filename, data, mode=0o644):
     import os, tempfile
     fd, fn = tempfile.mkstemp(dir=os.path.dirname(filename), prefix=os.path.basename(filename))
     try:

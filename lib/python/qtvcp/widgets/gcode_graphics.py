@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # -*- encoding: utf-8 -*-
 #
 #    Copyright 2016 Chris Morley
@@ -23,7 +23,7 @@ PyQt5 widget for plotting gcode.
 import sys
 import os
 import gcode
-from PyQt5.QtCore import pyqtProperty
+from PyQt5.QtCore import pyqtProperty, QTimer
 from PyQt5.QtGui import QColor
 
 from qt5_graphics import Lcnc_3dGraphics
@@ -39,7 +39,7 @@ STATUS = Status()
 INFO = Info()
 LOG = logger.getLogger(__name__)
 
-# Set the log level for this module
+# Force the log level for this module
 # LOG.setLevel(logger.INFO) # One of DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 
@@ -49,13 +49,29 @@ LOG = logger.getLogger(__name__)
 class  GCodeGraphics(Lcnc_3dGraphics, _HalWidgetBase):
     def __init__(self, parent=None):
         super( GCodeGraphics, self).__init__(parent)
-        self.colors['overlay_background'] = (0.0, 0.0, 0.57)  # blue
+
+        self.colors['overlay_background'] = (0.0, 0.0, 0.0)  # blue
+        self._overlayColor = QColor(0, 0, 0, 0)
+
         self.colors['back'] = (0.0, 0.0, 0.75)  # blue
-        self._color = QColor(0, 0, 0.75, 150)
+        self._backgroundColor = QColor(0, 0, 0.75, 150)
+
+        self.use_gradient_background = False
+        # color1 is the bottom color that blends up to color2
+        self.gradient_color1 = (0.,0,.5)
+        self.gradient_color2 = (0,.0, 0)
+
         self.show_overlay = False  # no DRO or DRO overlay
         self._reload_filename = None
-        self.use_gradient_background = False
+
         self._view_incr = 20
+        self.inhibit_selection = False
+        self._block_line_selected = False
+
+    def addTimer(self):
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.poll)
+        self.timer.start(INFO.GRAPHICS_CYCLE_TIME)
 
     def _hal_init(self):
         STATUS.connect('file-loaded', self.load_program)
@@ -63,11 +79,19 @@ class  GCodeGraphics(Lcnc_3dGraphics, _HalWidgetBase):
         STATUS.connect('actual-spindle-speed-changed', self.set_spindle_speed)
         STATUS.connect('metric-mode-changed', lambda w, f: self.set_metric_units(w, f))
         STATUS.connect('graphics-view-changed', self.set_view_signal)
+        STATUS.connect('gcode-line-selected', lambda w, l: self.highlight_graphics(l))
+
+    # external source asked for hightlight,
+    # make sure we block the propagation
+    def highlight_graphics(self, line):
+        if self._current_file is None: return
+        self._block_line_selected = True
+        self.set_highlight_line(line)
 
     def set_view_signal(self, w, view, args):
         v = view.lower()
         if v == 'clear':
-            self.clear_live_plotter()
+            self.logger.clear()
         elif v == 'zoom-in':
             self.zoomin()
         elif v == 'zoom-out':
@@ -108,6 +132,23 @@ class  GCodeGraphics(Lcnc_3dGraphics, _HalWidgetBase):
             self.panView(args.get('X'),args.get('Y'))
         elif v == 'rotate-view':
             self.rotateView(args.get('X'),args.get('Y'))
+        elif v == 'grid-size':
+            self.grid_size = args.get('SIZE')
+            self.updateGL()
+        elif v == 'alpha-mode-on':
+            self.set_alpha_mode(True)
+        elif v == 'alpha-mode-off':
+            self.set_alpha_mode(False)
+        elif v == 'inhibit-selection-on':
+            self.inhibit_selection = True
+        elif v == 'inhibit-selection-off':
+            self.inhibit_selection = False
+        elif v == 'dimensions-on':
+            self.show_extents_option = True
+            self.updateGL()
+        elif v == 'dimensions-off':
+            self.show_extents_option = False
+            self.updateGL()
         else:
             self.set_view(v)
 
@@ -116,6 +157,8 @@ class  GCodeGraphics(Lcnc_3dGraphics, _HalWidgetBase):
         self._reload_filename = fname
         self.load(fname)
         STATUS.emit('graphics-gcode-properties',self.gcode_properties)
+        # reset the current view to standard calculated zoom and position
+        self.set_current_view()
 
     def set_metric_units(self, w, state):
         self.metric_units = state
@@ -138,12 +181,11 @@ class  GCodeGraphics(Lcnc_3dGraphics, _HalWidgetBase):
 
     def reloadfile(self, w):
         LOG.debug('reload the display: {}'.format(self._reload_filename))
-        dist = self.get_zoom_distance()
         try:
-            self.load_program(None, self._reload_filename)
-            self.set_zoom_distance(dist)
+            self.load(self._reload_filename)
+            STATUS.emit('graphics-gcode-properties',self.gcode_properties)
         except:
-            print 'error', self._reload_filename
+            print('error', self._reload_filename)
             pass
 
 
@@ -155,17 +197,23 @@ class  GCodeGraphics(Lcnc_3dGraphics, _HalWidgetBase):
         error_str = gcode.strerror(result)
         errortext = "G-Code error in " + os.path.basename(filename) + "\n" + "Near line " \
                     + str(seq) + " of\n" + filename + "\n" + error_str + "\n"
-        print(errortext)
         STATUS.emit("graphics-gcode-error", errortext)
 
     # Override qt5_graphics / glcannon.py function so we can emit a GObject signal
+    # block sending out signal if the highlight request
+    # came from an external source - we only send it out
+    # if someone clicked on us
     def update_highlight_variable(self, line):
         self.highlight_line = line
+        if self._block_line_selected:
+            self._block_line_selected = False
+            return
         if line is None:
             line = -1
         STATUS.emit('graphics-line-selected', line)
 
     def select_fire(self):
+        if self.inhibit_selection: return
         if STATUS.is_auto_running(): return
         if not self.select_primed: return
         x, y = self.select_primed
@@ -175,6 +223,10 @@ class  GCodeGraphics(Lcnc_3dGraphics, _HalWidgetBase):
     # override user plot -One could add gl commands to plot static objects here
     def user_plot(self):
         return
+
+    def emit_percent(self, f):
+        super( GCodeGraphics, self).emit_percent(f)
+        STATUS.emit('graphics-loading-progress',f)
 
     #########################################################################
     # This is how designer can interact with our widget properties.
@@ -223,7 +275,7 @@ class  GCodeGraphics(Lcnc_3dGraphics, _HalWidgetBase):
         return self.show_overlay
     def resetoverlay(self):
         self.show_overlay(False)
-    overlay = pyqtProperty(bool, getoverlay, setoverlay, resetoverlay)
+    _overlay = pyqtProperty(bool, getoverlay, setoverlay, resetoverlay)
 
     # show Offsets
     def setShowOffsets(self, state):
@@ -233,18 +285,40 @@ class  GCodeGraphics(Lcnc_3dGraphics, _HalWidgetBase):
         return self.show_offsets
     _offsets = pyqtProperty(bool, getShowOffsets, setShowOffsets)
 
-    def getColor(self):
-        return self._color
-    def setColor(self, value):
-        self._color = value
-        #print value.getRgbF()
-        self.colors['back'] = (value.redF(), value.greenF(), value.blueF())
+    def getOverlayColor(self):
+        return self._overlayColor
+    def setOverlayColor(self, value):
+        self._overlayColor = value
         self.colors['overlay_background'] = (value.redF(), value.greenF(), value.blueF())
         self.updateGL()
-    def resetState(self):
-        self._color = QColor(0, 0, .75, 150)
-    background_color = pyqtProperty(QColor, getColor, setColor)
+    def resetOverlayColor(self):
+        self._overlayColor = QColor(0, 0, .75, 150)
+    overlay_color = pyqtProperty(QColor, getOverlayColor, setOverlayColor, resetOverlayColor)
 
+    def getBackgroundColor(self):
+        return self._backgroundColor
+    def setBackgroundColor(self, value):
+        self._backgroundColor = value
+        #print value.getRgbF()
+        self.colors['back'] = (value.redF(), value.greenF(), value.blueF())
+        self.gradient_color1 = (value.redF(), value.greenF(), value.blueF())
+        self.updateGL()
+    def resetBackgroundColor(self):
+        self._backgroundColor = QColor(0, 0, 0, 0)
+        self.gradient_color1 = QColor(0, 0, 0, 0)
+        value = QColor(0, 0, 0, 0)
+        self.gradient_color1 = (value.redF(), value.greenF(), value.blueF())
+        self.colors['back'] = (value.redF(), value.greenF(), value.blueF())
+        self.updateGL()
+    background_color = pyqtProperty(QColor, getBackgroundColor, setBackgroundColor, resetBackgroundColor)
+
+    # use gradient background
+    def setGradientBackground(self, state):
+        self.use_gradient_background = state
+        self.updateGL()
+    def getGradientBackground(self):
+        return self.use_gradient_background
+    _use_gradient_background = pyqtProperty(bool, getGradientBackground, setGradientBackground)
 
 # For testing purposes, include code to allow a widget to be created and shown
 # if this file is run.
@@ -256,5 +330,7 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     widget =  GCodeGraphics()
+    widget.use_gradient_background = True
+    widget.enable_dro = True
     widget.show()
     sys.exit(app.exec_())
