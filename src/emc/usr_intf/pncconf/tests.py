@@ -464,6 +464,10 @@ But there is not one in the machine-named folder.."""),True)
             return
         d = self.d
         w = self.w
+        self.w.xtunedir.set_tooltip_text(_(
+"""± = move on both sides of start position\n
++ = move on positive side of start position\n
+- = move on negative side of start position"""))
         self.updaterunning = False
         self.scale = self.enc_scale = 1000
         axnum = "xyzas".index(axis)
@@ -474,9 +478,9 @@ But there is not one in the machine-named folder.."""),True)
         self.encoder = self.a.encoder_sig(axis)
         #print axis," encoder--",self.encoder
         pwm_sig = self.a.pwmgen_sig(axis)
-        self.pwm = self.d.make_pinname(pwm_sig)
+        self.pwm = self.a.make_pinname(pwm_sig)
         #print axis," pwgen--",self.pwmgen
-        pump = self.d.findsignal("charge-pump")
+        pump = self.a.findsignal("charge-pump")
 
         if self.stepgen:
             state = True
@@ -493,7 +497,7 @@ But there is not one in the machine-named folder.."""),True)
         w.xsteptable.set_sensitive(state)
         distance = 2
         if axis == "a":
-            w,xtunedistunits.set_text(_("degrees"))
+            w.xtunedistunits.set_text(_("degrees"))
             w.xtunevelunits.set_text(_("degrees / minute"))
             w.xtuneaccunits.set_text(_("degrees / second²"))
             distance = 360
@@ -609,18 +613,20 @@ But there is not one in the machine-named folder.."""),True)
         halrun.write("setp pid.0.maxoutput  %d\n"% ( w[axis+"maxoutput"].get_value() ))
         halrun.write("setp pid.0.error-previous-target true\n")
         if self.stepgen:
-            halrun.write("setp pid.0.maxerror .0005\n")
+            if self.d.units == _PD._IMPERIAL:
+                halrun.write("setp pid.0.maxerror .0005\n")
+            else:
+                halrun.write("setp pid.0.maxerror .0127\n")
         halrun.write("net enable     =>  pid.0.enable\n")
         halrun.write("net output     <=  pid.0.output\n")
         halrun.write("net pos-cmd    =>  pid.0.command\n")
-        halrun.write("net vel-cmd    =>  pid.0.command-deriv\n")
         halrun.write("net pos-fb     =>  pid.0.feedback\n")
         # search and connect I/o signals needed to enable amps etc
         self.hal_test_signals(axis)
         # for encoder signals
         if self.encoder: 
             #print self.encoder,"--",self.encoder[4:5],self.encoder[10:],self.encoder[6:7] 
-            self.enc_signalname = self.d.make_pinname(self.encoder)
+            self.enc_signalname = self.a.make_pinname(self.encoder)
             if w[axis+"invertmotor"].get_active():
                 self.enc_scale = get_value(w[axis + "encoderscale"]) * -1
             else:
@@ -654,7 +660,7 @@ But there is not one in the machine-named folder.."""),True)
                 for i in pwminvertlist:
                     halrun.write("setp    "+i+".invert_output true\n")
             else: # sserial PWM
-                pwm_enable = self.d.make_pinname(pwm_sig,False,True) # get prefix only
+                pwm_enable = self.a.make_pinname(pwm_sig,gpionumber = False, prefixonly = True) # get prefix only
                 halrun.write("net enable %s \n"%  (pwm_enable +"analogena"))
                 halrun.write("setp   "+self.pwm+"-minlim   %.1f\n"% pwmminlimit)
                 halrun.write("setp   "+self.pwm+"-maxlim   %.1f\n"% pwmmaxlimit)
@@ -668,15 +674,19 @@ But there is not one in the machine-named folder.."""),True)
         # for step gen components
         if self.stepgen:                        
             # check current component number to signal's component number                             
-            self.step_signalname = self.d.make_pinname(self.stepgen) 
+            self.step_signalname = self.a.make_pinname(self.stepgen) 
             #print "step_signal--",self.step_signalname   
             if w[axis+"invertmotor"].get_active():
                 self.scale = get_value(w[axis + "stepscale"]) * -1
             else:
                 self.scale = get_value(w[axis + "stepscale"]) * 1
+
+            # invert step pins if requested
             stepinvertlist = self.a.stepgen_invert_pins(step_sig)
-            for i in stepinvertlist:
-                halrun.write("setp    "+i+".invert_output true\n")
+            for i in stepinvertlist[0]:
+                   print >>file, "setp   " + self.step_signalname + ".step.invert_output   true"
+            for i in stepinvertlist[1]:
+                   print >>file, "setp   " + self.step_signalname + ".direction.invert_output   true"
             halrun.write("setp %s.step_type 0 \n"% (self.step_signalname))
             halrun.write("setp %s.control-type 1 \n"% (self.step_signalname))
             halrun.write("setp %s.position-scale %f \n"% (self.step_signalname,self.scale))
@@ -889,14 +899,14 @@ But there is not one in the machine-named folder.."""),True)
         if not self.a.check_for_rt():
             return
         # one needs real time, pwm gen and an encoder for open loop testing.
-        temp = self.d.findsignal( (axis + "-encoder-a"))
-        self.enc = self.d.make_pinname(temp)
-        temp = self.d.findsignal( (axis + "-resolver"))
-        self.res = self.d.make_pinname(temp)
-        pwm_sig = self.d.findsignal( (axis + "-pwm-pulse"))
-        self.pwm = self.d.make_pinname(pwm_sig)
-        pot_sig = self.d.findsignal(axis+"-pot-output")
-        self.pot = self.d.make_pinname(pot_sig)
+        temp = self.a.findsignal( (axis + "-encoder-a"))
+        self.enc = self.a.make_pinname(temp)
+        temp = self.a.findsignal( (axis + "-resolver"))
+        self.res = self.a.make_pinname(temp)
+        pwm_sig = self.a.findsignal( (axis + "-pwm-pulse"))
+        self.pwm = self.a.make_pinname(pwm_sig)
+        pot_sig = self.a.findsignal(axis+"-pot-output")
+        self.pot = self.a.make_pinname(pot_sig)
 
         if axis == "s":
             if (not self.pwm and not self.pot) and (not self.enc and not self.res):
@@ -932,7 +942,7 @@ But there is not one in the machine-named folder.."""),True)
             pwmmaxlimit = get_value(widgets[axis+"outputmaxlimit"])
             pwmmaxoutput = get_value(widgets[axis+"outputscale"])
         enc_scale = get_value(widgets[axis+"encoderscale"])
-        pump = self.d.findsignal("charge-pump")
+        pump = self.a.findsignal("charge-pump")
         print 'fast %d,max %d, ss max %d, dac_scale %d'%(fastdac,max_dac,pwmmaxoutput,dac_scale)
         halrun.write("loadrt threads period1=%d name1=base-thread fp1=0 period2=%d name2=servo-thread \n" % (100000, self.d.servoperiod  ))
         load,read,write = self.a.hostmot2_command_string()
@@ -989,7 +999,7 @@ But there is not one in the machine-named folder.."""),True)
                     halrun.write("setp    "+i+".invert_output true\n")
 
             else: # sserial PWM
-                pwm_enable = self.d.make_pinname(pwm_sig,False,True) # get prefix only
+                pwm_enable = self.a.make_pinname(pwm_sig,False,True) # get prefix only
                 if 'analogout5' in self.pwm:
                     enable ='spinena'
                 else:
@@ -1125,7 +1135,7 @@ But there is not one in the machine-named folder.."""),True)
         halrun = self.halrun
         def write_pins(pname,p,i,t):
             if p in signallist:
-                pinname  = self.d.make_pinname(pname)
+                pinname  = self.a.make_pinname(pname)
                 if pinname:
                     #print p, pname, i
                     if p == "estop-out": signal = p

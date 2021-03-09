@@ -40,6 +40,7 @@ import linuxcnc            # to get our own error system
 import gobject             # needed to add the timer for periodic
 import locale              # for setting the language of the GUI
 import gettext             # to extract the strings to be translated
+from collections import OrderedDict # needed for proper jog button arrangement
 
 from gladevcp.gladebuilder import GladeBuilder
 
@@ -70,26 +71,9 @@ def excepthook(exc_type, exc_obj, exc_tb):
 
 sys.excepthook = excepthook
 
-debug = False
-
-if debug:
-    pydevdir = '/home/emcmesa/liclipse/plugins/org.python.pydev_4.5.4.201601292050/pysrc'
-
-    if os.path.isdir(pydevdir):  # and  'emctask' in sys.builtin_module_names:
-        sys.path.append(pydevdir)
-        sys.path.insert(0, pydevdir)
-        try:
-            import pydevd
-
-            print("pydevd imported, connecting to Eclipse debug server...")
-            pydevd.settrace()
-        except:
-            print("no pydevd module found")
-            pass
-
 # constants
 #         # gmoccapy  #"
-_RELEASE = " 3.0.7.2"
+_RELEASE = " 3.1.3"
 _INCH = 0                         # imperial units are active
 _MM = 1                           # metric units are active
 
@@ -225,6 +209,8 @@ class gmoccapy(object):
 
         self.gcodeerror = ""   # we need this to avoid multiple messages of the same error
 
+        self.file_changed = False
+
         self.lathe_mode = None # we need this to check if we have a lathe config
         self.backtool_lathe = False
         self.diameter_mode = False
@@ -331,6 +317,7 @@ class gmoccapy(object):
         self._init_gremlin()
         self._init_kinematics_type()
         self._init_hide_cursor()
+        self._init_hide_tooltips()
         self._init_offsetpage()
         self._init_keybindings()
         self._init_IconFileSelection()
@@ -475,6 +462,7 @@ class gmoccapy(object):
                       "btn_select_tool_by_no", "btn_spindle_100", "spc_rapid", "spc_spindle",
                       "btn_tool_touchoff_x", "btn_tool_touchoff_z"
         ]
+        # 
         self._sensitize_widgets(widgetlist, False)
 
         # this must be done last, otherwise we will get wrong values
@@ -500,6 +488,7 @@ class gmoccapy(object):
         if self.lathe_mode:
             # we do need to know also if we have a backtool lathe
             self.backtool_lathe = self.get_ini_info.get_backtool_lathe()
+
         # check if the user want actual or commanded for the DRO
         self.dro_actual = self.get_ini_info.get_position_feedback_actual()
         # the given Jog Increments
@@ -519,6 +508,10 @@ class gmoccapy(object):
         # get the values for the sliders
         self.rabbit_jog = self.get_ini_info.get_jog_vel()
         self.jog_rate_max = self.get_ini_info.get_max_jog_vel()
+
+        self.min_ang_vel = self.get_ini_info.get_min_ang_jog_vel()
+        self.default_ang_vel = self.get_ini_info.get_default_ang_jog_vel()
+        self.max_ang_vel = self.get_ini_info.get_max_ang_jog_vel()
         self.spindle_override_max = self.get_ini_info.get_max_spindle_override()
         self.spindle_override_min = self.get_ini_info.get_min_spindle_override()
         self.feed_override_max = self.get_ini_info.get_max_feed_override()
@@ -527,6 +520,7 @@ class gmoccapy(object):
 
     def _get_pref_data(self):
         self.prefs = preferences.preferences(self.get_ini_info.get_preference_file_path())
+
         # the size and digits of the DRO
         # set default values according to the machine units
         digits = 3
@@ -541,14 +535,35 @@ class gmoccapy(object):
         self.dtg_color = self.prefs.getpref("dtg_color", "#FFFF00", str)         # yellow
         self.homed_color = self.prefs.getpref("homed_color", "#00FF00", str)     # green
         self.unhomed_color = self.prefs.getpref("unhomed_color", "#FF0000", str) # red
-        
+
+        # do we want gremlin dro ?
+        self.enable_gremlin_dro = self.prefs.getpref("enable_dro", False, bool)
+
+        # the scale to be applied to the counts of the hardware mpg wheel, to avoid to much turning
+        self.scale_jog_vel = self.prefs.getpref("scale_jog_vel", self.jog_rate_max / 100, float)
+        self.scale_spindle_override = self.prefs.getpref("scale_spindle_override", 1, float)
+        self.scale_feed_override = self.prefs.getpref("scale_feed_override", 1, float)
+        self.scale_rapid_override = self.prefs.getpref("scale_rapid_override", 1, float)
+
+        # holds the max velocity value and is needed to be able to jog at
+        # at max velocity if <SHIFT> is hold during jogging
+        self.max_velocity = self.stat.max_velocity
+
         # the velocity settings
         self.min_spindle_rev = self.prefs.getpref("spindle_bar_min", 0.0, float)
         self.max_spindle_rev = self.prefs.getpref("spindle_bar_max", 6000.0, float)
-        
+
+        self.turtle_jog_factor = self.prefs.getpref('turtle_jog_factor', 20, int)
+        self.hide_turtle_jog_button = self.prefs.getpref("hide_turtle_jog_button", False, bool)
+
         self.unlock_code = self.prefs.getpref("unlock_code", "123", str)  # get unlock code
 
         self.toggle_readout = self.prefs.getpref("toggle_readout", True, bool)
+
+        # if there is a INI Entry for default spindle speed, we will use that one as default
+        # but if there is a setting in our preference file, that one will beet the INI entry
+        default_spindle_speed = self.get_ini_info.get_default_spindle_speed()
+        self.spindle_start_rpm = self.prefs.getpref( 'spindle_start_rpm', default_spindle_speed, float )
 
 ###############################################################################
 ##                     create widgets dynamically                            ##
@@ -693,19 +708,24 @@ class gmoccapy(object):
 
     def _get_button_with_image(self, name, filepath, stock):
         image = gtk.Image()
-        image.set_size_request(48,48)
-        btn = self._get_button(name, image)
-        if filepath:
-            image.set_from_file(filepath)
-        else:
-            image.set_from_stock(stock, 48)
-        return btn
-
-    def _get_button(self, name, image):
+        image.set_size_request(72,48)
         btn = gtk.Button()
         btn.set_size_request(85,56)
-        btn.add(image)
         btn.set_property("name", name)
+        try:
+            if filepath:
+                pixbuf = gtk.gdk.pixbuf_new_from_file_at_size(filepath, 72, 48)
+                image.set_from_pixbuf(pixbuf)
+            else:
+                image.set_from_stock(stock, 48)
+            btn.add(image)
+        except:
+            message = _("**** GMOCCAPY ERROR ****\n")
+            message += _("**** could not resolv the image path '{0}' given for macro button '{1}' ****".format(filepath, name))
+            print(message)
+            image.set_from_stock(gtk.STOCK_MISSING_IMAGE, 48)
+            btn.add(image)
+        
         btn.show_all()
         return btn
 
@@ -927,8 +947,7 @@ class gmoccapy(object):
         self.widgets.hbtb_touch_off.pack_start(btn)
         btn.show()
 
-        name = "touch_back"
-        btn = self._get_button_with_image(name, None, gtk.STOCK_UNDO)
+        btn = self._get_button_with_image("touch_back", None, gtk.STOCK_UNDO)
         btn.set_property("tooltip-text", _("Press to return to main button list"))
         btn.connect("clicked", self._on_btn_home_back_clicked)
         self.widgets.hbtb_touch_off.pack_start(btn)
@@ -1013,6 +1032,10 @@ class gmoccapy(object):
         self.active_increment = "rbt_0" 
 
     def _jog_increment_changed(self, widget,):
+        # first cancel any joints jogging
+        JOGMODE = self._get_jog_mode()
+        for jnum in range(self.stat.joints):
+            self.command.jog(linuxcnc.JOG_STOP, JOGMODE, jnum)
         self.distance = self._parse_increment(widget.name)
         self.halcomp["jog.jog-increment"] = self.distance
         self.active_increment = widget.name
@@ -1032,8 +1055,15 @@ class gmoccapy(object):
 
         # if shift = True, then the user pressed SHIFT for Jogging and
         # want's to jog at full speed
+        # This can only happen on keyboard jogging, not with the on screen jog button
+        # We just only use one function for both cases
         if shift:
-            value = self.stat.max_velocity
+            # There are no keyboard shortcuts to home angular axis, but 
+            # we implement the possibility for future options
+            if button_name[0] in "abc":
+                value = self.widgets.spc_ang_jog_vel.get_property("max") / 60
+            else:
+                value = self.stat.max_velocity
         else:
             if button_name[0] in "abc":
                 value = self.widgets.spc_ang_jog_vel.get_value() / 60
@@ -1050,10 +1080,9 @@ class gmoccapy(object):
         JOGMODE = self._get_jog_mode()
 
         if self.distance <> 0:  # incremental jogging
-            if self.lathe_mode and self.diameter_mode:
+            distance = self.distance
+            if self.lathe_mode and self.diameter_mode and button_name[0] == "x":
                 distance = self.distance/2
-            else:
-                distance = self.distance
             self.command.jog(linuxcnc.JOG_INCREMENT, JOGMODE, joint_no_or_axis_index, dir * velocity, distance)
         else:  # continuous jogging
             self.command.jog(linuxcnc.JOG_CONTINUOUS, JOGMODE, joint_no_or_axis_index, dir * velocity)
@@ -1113,7 +1142,7 @@ class gmoccapy(object):
         print("**** GMOCCAPY INFO ****")
         print("**** Entering make jog button")
 
-        self.jog_button_dic = {}
+        self.jog_button_dic = OrderedDict()
 
         for axis in self.axis_list:
             for direction in ["+","-"]:
@@ -1172,25 +1201,33 @@ class gmoccapy(object):
 
         btn = self._get_button_with_image("previous_button", None, gtk.STOCK_GO_BACK)
         btn.hide()
-        btn.set_property("tooltip-text", _("Press to display previous button"))
+        btn.set_property("tooltip-text", _("Press to display previous macro button"))
         btn.connect("clicked", self._on_btn_previous_macro_clicked)
         self.widgets.hbtb_MDI.pack_start(btn)
 
         for pos in range(0, num_macros):
             name = macros[pos]
-            lbl = name.split()[0]
-            # shorten / break line of the name if it is to long
-            if len(lbl) > 11:
-                lbl = lbl[0:10] + "\n" + lbl[11:20]
-            btn = gtk.Button(lbl, None, False)
-            btn.set_property("name","macro_{0}".format(pos))
-            btn.connect("pressed", self._on_btn_macro_pressed, name)
+
+            image = self._check_macro_for_image(name)
+            if image:
+                print("Macro {0} has image link".format(name))
+                print("Image = {0}".format(image))
+                btn = self._get_button_with_image("macro_{0}".format(pos), image, None)
+            else:
+                lbl = name.split()[0]
+                # shorten / break line of the name if it is to long
+                if len(lbl) > 11:
+                    lbl = lbl[0:10] + "\n" + lbl[11:20]
+                btn = gtk.Button(lbl, None, False)
+                btn.set_property("name","macro_{0}".format(pos))
+            btn.set_property("tooltip-text", _("Press to run macro {0}".format(name)))
+            btn.connect("clicked", self._on_btn_macro_pressed, name)
             btn.position = pos
             btn.show()
             self.widgets.hbtb_MDI.pack_start(btn, True, True, 0)
 
         btn = self._get_button_with_image("next_button", None, gtk.STOCK_GO_FORWARD)
-        btn.set_property("tooltip-text", _("Press to display next button"))
+        btn.set_property("tooltip-text", _("Press to display next macro button"))
         btn.connect("clicked", self._on_btn_next_macro_clicked)
         btn.hide()
         self.widgets.hbtb_MDI.pack_start(btn)
@@ -1227,6 +1264,33 @@ class gmoccapy(object):
             for pos in range(8, num_macros):
                 self.macro_dic["macro_{0}".format(pos)].hide()
 
+    def _check_macro_for_image(self, name):
+        image = False
+        for path in self.get_ini_info.get_subroutine_paths().split(":"):
+            file = path + "/" + name.split()[0] + ".ngc"
+            if os.path.isfile(file):
+                macrofile = open(file, "r")
+                lines = macrofile.readlines()
+                macrofile.close()
+                for line in lines:
+                    if line[0] == ";":
+                        continue
+                    if "image" in line.lower():
+                        image = True
+                        break
+                
+        # should be like that in ngc file
+        # (IMAGE, /home/my_home/my_image_dir/my_image.png)
+        # so we need to get the correct image path
+        if image:
+            image = line.split(",")[1]
+            image = image.strip()
+            image = image.replace(")","")
+            if "~" in image:
+                image = image.replace("~", os.path.expanduser("~"))
+            image = os.path.abspath(image)
+            
+        return image
 
     # if this is a lathe we need to rearrange some button and add a additional DRO
     def _make_lathe(self):
@@ -1268,19 +1332,14 @@ class gmoccapy(object):
         # but we have to show this one
         self.widgets.rbt_view_y2.show()
 
-        # we check the preferences, on purpose with the default p value
-        # if we recieve a p, that mean first start, otherwise we get y or Y2
-        view = self.prefs.getpref("view", "p", str)
+        if self.backtool_lathe:
+            view = "y2"
+        else:
+            view = "y"
+        self.prefs.putpref("view", view)
 
-        if view == "p":
-            if self.backtool_lathe:
-                view = "y2"
-            else:
-                view = "y"
-            self.prefs.putpref("view", view)
-
-        self.widgets.gremlin.set_property("view", view)
         self.widgets["rbt_view_{0}".format(view)].set_active(True)
+        self.widgets.gremlin.set_property("view", view)
 
         self._switch_to_g7(False)
 
@@ -1478,6 +1537,8 @@ class gmoccapy(object):
             elif btn_name == "z-":
                 col = 3
                 row = 2
+            # order of the data in the dict matters for extra buttons.
+            # This is why we use ordered dict for self.jog_button_dic
             else:
                 if count < 2:
                     col = 2
@@ -1565,17 +1626,11 @@ class gmoccapy(object):
 
     def _init_preferences(self):
         # check if NO_FORCE_HOMING is used in ini
-
         # disable reload tool on start up, if True
         if self.no_force_homing:
             self.widgets.chk_reload_tool.set_sensitive(False)
             self.widgets.chk_reload_tool.set_active(False)
             self.widgets.lbl_reload_tool.set_visible(True)
-
-        # if there is a INI Entry for default spindle speed, we will use that one as default
-        # but if there is a setting in our preference file, that one will beet the INI entry
-        default_spindle_speed = self.get_ini_info.get_default_spindle_speed()
-        self.spindle_start_rpm = self.prefs.getpref( 'spindle_start_rpm', default_spindle_speed, float )
 
         # set the slider limits
         self.widgets.spc_lin_jog_vel.set_property("min", 0)
@@ -1595,29 +1650,18 @@ class gmoccapy(object):
         self.widgets.spc_feed.set_value(100)
 
         # the scales to apply to the count of the hardware mpg wheel, to avoid to much turning
-        default = (self.jog_rate_max / 100)
-        self.scale_jog_vel = self.prefs.getpref("scale_jog_vel", default, float)
         self.widgets.adj_scale_jog_vel.set_value(self.scale_jog_vel)
-        self.scale_spindle_override = self.prefs.getpref("scale_spindle_override", 1, float)
         self.widgets.adj_scale_spindle_override.set_value(self.scale_spindle_override)
-        self.scale_feed_override = self.prefs.getpref("scale_feed_override", 1, float)
         self.widgets.adj_scale_feed_override.set_value(self.scale_feed_override)
-        self.scale_rapid_override = self.prefs.getpref("scale_rapid_override", 1, float)
         self.widgets.adj_scale_rapid_override.set_value(self.scale_rapid_override)
-
-        # holds the max velocity value and is needed to be able to jog at
-        # at max velocity if <SHIFT> is hold during jogging
-        self.max_velocity = self.stat.max_velocity
 
         # set and get all information for turtle jogging
         # self.rabbit_jog will be used in future to store the last value
         # so it can be recovered after jog_vel_mode switch
-        hide_turtle_jog_button = self.prefs.getpref("hide_turtle_jog_button", False, bool)
-        self.widgets.chk_turtle_jog.set_active(hide_turtle_jog_button)
-        self.turtle_jog_factor = self.prefs.getpref('turtle_jog_factor', 20, int)
+        self.widgets.chk_turtle_jog.set_active(self.hide_turtle_jog_button)
         self.widgets.adj_turtle_jog_factor.configure(self.turtle_jog_factor, 1,
                                                      100, 1, 0, 0)
-        if hide_turtle_jog_button:
+        if self.hide_turtle_jog_button:
             self.widgets.tbtn_turtle_jog.hide()
             self.turtle_jog_factor = 1
         self.turtle_jog = self.rabbit_jog / self.turtle_jog_factor
@@ -1630,13 +1674,16 @@ class gmoccapy(object):
             self.widgets.spc_lin_jog_vel.set_digits(2)
             self.widgets.spc_lin_jog_vel.set_property("unit", _("inch/min"))
 
-        # the size of the DRO
-        self.dro_size = self.prefs.getpref("dro_size", 28, int)
+        # the size of the DRO ; self.dro_size is initialized in _get_pref_data
         self.widgets.adj_dro_size.set_value(self.dro_size)
         
         # hide the angular jog vel if no angular joint is used
         if not "a" in self.axis_list and not "b" in self.axis_list and not "c" in self.axis_list:
             self.widgets.spc_ang_jog_vel.hide()
+        else:
+            self.widgets.spc_ang_jog_vel.set_property("min", self.min_ang_vel)
+            self.widgets.spc_ang_jog_vel.set_property("max", self.max_ang_vel)
+            self.widgets.spc_ang_jog_vel.set_value(self.default_ang_vel)
 
 # =============================================================
 # Dynamic tabs handling Start
@@ -1837,16 +1884,18 @@ class gmoccapy(object):
         self.widgets.grid_size.set_value( grid_size )
         self.widgets.gremlin.grid_size = grid_size
         view = view = self.prefs.getpref("view", "p", str )
-        self.widgets.gremlin.set_property( "view", view )
-        self.widgets.gremlin.set_property( "metric_units", int( self.stat.linear_units ) )
-        self.widgets.gremlin.set_property( "mouse_btn_mode", self.prefs.getpref( "mouse_btn_mode", 4, int ) )
-        self.widgets.gremlin.set_property( "use_commanded", not self.dro_actual)
+        self.widgets.gremlin.set_property("view", view )
+        self.widgets.gremlin.set_property("metric_units", int( self.stat.linear_units ) )
+        self.widgets.gremlin.set_property("mouse_btn_mode", self.prefs.getpref( "mouse_btn_mode", 4, int ) )
+        self.widgets.gremlin.set_property("use_commanded", not self.dro_actual)
+        self.widgets.gremlin.set_property("enable_dro", self.enable_gremlin_dro)
         self.widgets.eb_program_label.modify_bg(gtk.STATE_NORMAL, gtk.gdk.Color(0, 0, 0))
         self.widgets.eb_blockheight_label.modify_bg(gtk.STATE_NORMAL, gtk.gdk.Color(0, 0, 0))
 
     def _init_kinematics_type (self):
+        print("Kinematics type changed")
         if self.stat.kinematics_type != linuxcnc.KINEMATICS_IDENTITY:
-            self.widgets.gremlin.set_property( "enable_dro", True )
+            self.widgets.gremlin.set_property("enable_dro", True )
             self.widgets.gremlin.use_joints_mode = True
             self.widgets.tbtn_switch_mode.show()
             self.widgets.tbtn_switch_mode.set_label(_(" Joint\nmode"))
@@ -1855,7 +1904,7 @@ class gmoccapy(object):
             self.widgets.lbl_replace_mode_btn.hide()
             self.widgets.ntb_jog_JA.set_page(1)
         else:
-            self.widgets.gremlin.set_property( "enable_dro", False )
+            self.widgets.gremlin.set_property("enable_dro", self.enable_gremlin_dro )
             self.widgets.gremlin.use_joints_mode = False
             self.widgets.tbtn_switch_mode.hide()
             self.widgets.lbl_replace_mode_btn.show()
@@ -1873,6 +1922,16 @@ class gmoccapy(object):
         else:
             self.widgets.window1.window.set_cursor(None)
             self.widgets.gremlin.set_property("use_default_controls", True)
+
+    # init to hide tooltips
+    def _init_hide_tooltips(self):
+        self.widgets_with_tooltips = []
+        for widget in self.widgets:
+            if hasattr(widget, "set_has_tooltip"):
+                self.widgets_with_tooltips.append(widget)
+        self.hide_tooltips = self.prefs.getpref("hide_tooltips", False, bool)
+        self.widgets.chk_hide_tooltips.set_active(self.hide_tooltips)
+        self._set_enable_tooltips(not self.hide_tooltips)
 
 # =============================================================
 # Onboard keybord handling Start
@@ -2297,6 +2356,7 @@ class gmoccapy(object):
     # use the hal_status widget to control buttons and
     # actions allowed by the user and sensitive widgets
     def on_hal_status_all_homed(self, widget):
+        print("Hal Status all homed")
         self.all_homed = True
         self.widgets.ntb_button.set_current_page(_BB_MANUAL)
         widgetlist = ["rbt_mdi", "rbt_auto", "btn_index_tool", "btn_change_tool", "btn_select_tool_by_no",
@@ -2316,6 +2376,7 @@ class gmoccapy(object):
             self.command.mode(linuxcnc.MODE_MANUAL)
 
     def on_hal_status_not_all_homed(self, widget, joints):
+        print("Hal Status not all homed", joints)
         self.all_homed = False
         if self.no_force_homing:
             return
@@ -2359,7 +2420,7 @@ class gmoccapy(object):
 
         widgetlist = ["rbt_manual", "ntb_jog", "btn_from_line",
                       "tbtn_flood", "tbtn_mist", "rbt_forward", "rbt_reverse", "rbt_stop",
-                      "btn_load", "btn_edit", "tbtn_optional_blocks"
+                      "btn_load", "btn_edit", "tbtn_optional_blocks", "btn_reload"
         ]
         if not self.widgets.rbt_hal_unlock.get_active() and not self.user_mode:
             widgetlist.append("tbtn_setup")
@@ -2405,7 +2466,7 @@ class gmoccapy(object):
         widgetlist = ["rbt_manual", "rbt_mdi", "rbt_auto", "tbtn_setup", "btn_index_tool",
                       "btn_from_line", "btn_change_tool", "btn_select_tool_by_no",
                       "btn_load", "btn_edit", "tbtn_optional_blocks", "rbt_reverse", "rbt_stop", "rbt_forward",
-                      "btn_tool_touchoff_x", "btn_tool_touchoff_z", "btn_touch"
+                      "btn_tool_touchoff_x", "btn_tool_touchoff_z", "btn_touch", "btn_reload"
         ]
         # in MDI it should be possible to add more commands, even if the interpreter is running
         if self.stat.task_mode != linuxcnc.MODE_MDI:
@@ -2427,7 +2488,6 @@ class gmoccapy(object):
         self.widgets.tbtn_estop.set_image(self.widgets.img_emergency)
         self.widgets.tbtn_on.set_image(self.widgets.img_machine_on)
         self.widgets.tbtn_on.set_sensitive(False)
-        self.widgets.chk_ignore_limits.set_sensitive(False)
         self.widgets.tbtn_on.set_active(False)
         self.command.mode(linuxcnc.MODE_MANUAL)
 
@@ -2440,8 +2500,6 @@ class gmoccapy(object):
         self.widgets.ntb_jog_JA.set_sensitive(False)
         self.widgets.vbtb_jog_incr.set_sensitive(False)
         self.widgets.hbox_jog_vel.set_sensitive(False)
-        self.widgets.chk_ignore_limits.set_sensitive(True)
-        self._check_limits()
 
     def on_hal_status_state_off(self, widget):
         widgetlist = ["rbt_manual", "rbt_mdi", "rbt_auto", "btn_homing", "btn_touch", "btn_tool",
@@ -2455,7 +2513,6 @@ class gmoccapy(object):
             self.widgets.tbtn_on.set_active(False)
         self.widgets.tbtn_on.set_image(self.widgets.img_machine_off)
         self.widgets.btn_exit.set_sensitive(True)
-        self.widgets.chk_ignore_limits.set_sensitive(True)
         self.widgets.ntb_main.set_current_page(0)
         self.widgets.ntb_button.set_current_page(_BB_MANUAL)
         self.widgets.ntb_info.set_current_page(0)
@@ -2472,10 +2529,21 @@ class gmoccapy(object):
             self.widgets.tbtn_on.set_active(True)
         self.widgets.tbtn_on.set_image(self.widgets.img_machine_on)
         self.widgets.btn_exit.set_sensitive(False)
-        self.widgets.chk_ignore_limits.set_sensitive(False)
         if self.widgets.ntb_main.get_current_page() != 0:
             self.command.mode(linuxcnc.MODE_MANUAL)
             self.command.wait_complete()
+
+    def on_hal_status_override_limits_changed(self, object, state, limits_list):
+        # object = hal_status from glade file
+        # state = true if override_limit is active
+        # limits_list = list of joint with active override limits, normally all)
+        self.widgets.chk_ignore_limits.set_active(state)
+
+    def on_hal_status_limits_tripped(self, object, state, lst_limits):
+        # object = hal_status from glade file
+        # state = true if limit has been tripped
+        # lst_limits = list of joint limits that has been tripped ([0,0],[0,1],[0,0])
+        self.widgets.chk_ignore_limits.set_sensitive(state)
 
     def on_hal_status_mode_manual(self, widget):
         print ("MANUAL Mode")
@@ -2490,8 +2558,7 @@ class gmoccapy(object):
         self.widgets.ntb_button.set_current_page(_BB_MANUAL)
         self.widgets.ntb_info.set_current_page(0)
         self.widgets.ntb_jog.set_current_page(0)
-        self._check_limits()
-        
+
         # if the status changed, we reset the key event, otherwise the key press
         # event will not change, if the user did the last change with keyboard shortcut
         # This is caused, because we record the last key event to avoid multiple key
@@ -2576,6 +2643,7 @@ class gmoccapy(object):
             self.last_key_event = None, 0
 
     def on_hal_status_motion_mode_changed(self, widget, new_mode):
+        print("hal status motion mode changed")
         # Motion mode change in identity kinematics makes no sense
         # so we will not react on the signal and correct the misbehavior
         # self.stat.motion_mode return
@@ -2591,7 +2659,7 @@ class gmoccapy(object):
             state = False
         else:
             if not self.widgets.tbtn_fullsize_preview0.get_active():
-                self.widgets.gremlin.set_property("enable_dro", False)
+                self.widgets.gremlin.set_property("enable_dro", self.enable_gremlin_dro)
             self.widgets.gremlin.use_joints_mode = False
             self.widgets.tbtn_switch_mode.set_active(False)
             self.widgets.ntb_jog_JA.set_page(0)
@@ -2601,6 +2669,7 @@ class gmoccapy(object):
         self._sensitize_widgets(widgetlist, state)
 
     def on_hal_status_metric_mode_changed(self, widget, metric_units):
+        print("hal status metric mode changed")
         # set gremlin_units
         self.widgets.gremlin.set_property("metric_units", metric_units)
 
@@ -2659,7 +2728,6 @@ class gmoccapy(object):
         file = self.prefs.getpref("open_file", "", str)
         if file:
             self.widgets.file_to_load_chooser.set_filename(file)
-            # self.command.program_open(file)
             self.widgets.hal_action_open.load_file(file)
 
         # check how to start the GUI
@@ -2690,7 +2758,7 @@ class gmoccapy(object):
 
         # set up the hal pin status of tool measurement
         # could not be done prior to this, as the hal pin are not created before
-        # the tool measure check, due to the reason we need tzo know if creation
+        # the tool measure check, due to the reason we need to know if creation
         # of tool measurement button is needed. So we call the toogle action to
         # set all up and running
         self.on_chk_use_tool_measurement_toggled(self.widgets.chk_use_tool_measurement)
@@ -3268,6 +3336,26 @@ class gmoccapy(object):
             self.command.mdi("G43")
             self.command.wait_complete()
 
+    def _set_enable_tooltips(self, value):
+        print("_set_enable_tooltips = ", value)
+        # this will hide the tooltips from the glade file widgets,
+        # but not from the ones we created dynamically
+        for widget in self.widgets_with_tooltips:
+            widget.set_has_tooltip(value)
+        # the dynamicaly created widgets are in ordert in dictionarys
+        # self.joints_button_dic (only in non trivial kinematics)
+        # self.ref_button_dic
+        # self.touch_button_dic
+        # self.jog_button_dic
+        # self.macro_dic
+        dictionaries = (self.ref_button_dic, self.touch_button_dic,
+                        self.jog_button_dic, self.macro_dic)
+        if not self.trivial_kinematics:
+            dictionaries.append(self.joints_button_dic)
+        for dict in dictionaries:
+            for widget in dict:
+                dict[widget].set_has_tooltip(value)
+
 # helpers functions end
 # =========================================================
 
@@ -3531,7 +3619,7 @@ class gmoccapy(object):
 
     def _on_btn_home_clicked(self, widget):
         # home axis or joint?
-        print("on button home clicker = ", widget.name)
+        print("on button home clicked = ", widget.name)
         if "axis" in widget.name:
             value = widget.name[-1]
             # now get the joint from directory by the value
@@ -3558,34 +3646,24 @@ class gmoccapy(object):
 # The homing functions
 # =========================================================
 
-    def _check_limits(self):
-        for axis in self.axis_list:
-            axisnumber = "xyzabcuvw".index(axis)
-            if self.stat.limit[axisnumber] != 0:
-                return True
-        if self.widgets.chk_ignore_limits.get_active():
-            self.widgets.chk_ignore_limits.set_active(False)
-        return False
-
     def _ignore_limits(self, pin):
         self.widgets.chk_ignore_limits.set_active(pin.get())
 
     def on_chk_ignore_limits_toggled(self, widget, data=None):
         if self.widgets.chk_ignore_limits.get_active():
-            if not self._check_limits():
-                self._show_error((11, _("ERROR : No limit switch is active, ignore limits will not be set.")))
-                return
-            self.command.override_limits()
+           self.command.override_limits()
 
     def on_tbtn_fullsize_preview_toggled(self, widget, data=None):
+        state = widget.get_active()
         name = gtk.Buildable.get_name(widget)
         if name[-1] == "0":
             name_2 = name[:-1] + "1"
         else:
             name_2 = name[:-1] + "0"
+        self.widgets[name_2].set_active(state)
         print("tbtn_fullsize_toggled", name, name_2)
-        state = widget.get_active()
-        if widget.get_active():
+
+        if state:
             self.widgets.box_info.hide()
             self.widgets.vbx_jog.hide()
             dro = self.dro_dic[self.dro_dic.keys()[0]]
@@ -3597,9 +3675,8 @@ class gmoccapy(object):
             self.widgets.box_info.show()
             self.widgets.vbx_jog.show()
             if not self.widgets.chk_show_dro.get_active():
-                self.widgets.gremlin.set_property("enable_dro", False)
-        self.widgets[name_2].set_active(state)
-        
+                self.widgets.gremlin.set_property("enable_dro", self.enable_gremlin_dro)
+
 # =========================================================
 # this are hal-tools copied from gsreen function
     def on_btn_show_hal_clicked(self, widget, data=None):
@@ -3897,11 +3974,18 @@ class gmoccapy(object):
     # All use the same callback offset
     def on_btn_back_clicked(self, widget, data=None):
         if self.widgets.ntb_button.get_current_page() == _BB_EDIT:  # edit mode, go back to auto_buttons
+            if self.file_changed:
+                message = "Do you want to exit without saving the changes?"
+                result = self.dialogs.yesno_dialog(self, message, _("Attention!!"))
+                if not result: # user says no, he want to save
+                    return
             self.widgets.ntb_button.set_current_page(_BB_AUTO)
             if self.widgets.tbtn_fullsize_preview0.get_active():
                 self.widgets.vbx_jog.set_visible(False)
         elif self.widgets.ntb_button.get_current_page() == _BB_LOAD_FILE:  # File selection mode
             self.widgets.ntb_button.set_current_page(_BB_AUTO)
+            self.widgets.tbtn_fullsize_preview0.set_active(False)
+            self.on_tbtn_fullsize_preview_toggled(self.widgets.tbtn_fullsize_preview0)
         else:  # else we go to main button on manual
             self.widgets.ntb_button.set_current_page(_BB_MANUAL)
             self.widgets.ntb_main.set_current_page(0)
@@ -3916,31 +4000,27 @@ class gmoccapy(object):
 
     def on_tbtn_edit_offsets_toggled(self, widget, data=None):
         state = widget.get_active()
-        self.widgets.offsetpage1.edit_button.set_active( state )
-        widgetlist = ["btn_zero_x", "btn_zero_y", "btn_zero_z", "btn_set_value_x", "btn_set_value_y",
-                      "btn_set_value_z", "btn_set_selected", "ntb_jog", "btn_set_selected", "btn_zero_g92",
-                      "rbt_mdi","rbt_auto","tbtn_setup"
-        ]
+        self.widgets.offsetpage1.edit_button.set_active(state)
+        self.widgets.ntb_preview.set_current_page(1)
+
+        if self.widgets.rbtn_show_preview.get_active() and not state:
+            self.widgets.ntb_preview.set_current_page(0)
+
+        widgetlist = ["ntb_jog", "rbt_mdi","rbt_auto","tbtn_setup"]
 
         if self.widgets.tbtn_user_tabs.get_sensitive():
             widgetlist.append("tbtn_user_tabs")
         self._sensitize_widgets( widgetlist, not state )
 
-        if state:
-            self.widgets.ntb_preview.set_current_page(1)
-        else:
-            self.widgets.ntb_preview.set_current_page(0)
+        for element in self.touch_button_dic:
+            if self.touch_button_dic[element].name in ["edit_offsets", "touch_back"]:
+                continue
+            self.touch_button_dic[element].set_sensitive(not state)
 
-        # we have to replace button calls in our list to make all hardware button
-        # activate the correct button call
-        if state and self.widgets.chk_use_tool_measurement.get_active():
-            self.widgets.btn_zero_g92.show()
-            self.widgets.btn_block_height.hide()
-            self._replace_list_item(4, "btn_block_height", "btn_zero_g92")
-        elif not state and self.widgets.chk_use_tool_measurement.get_active():
-            self.widgets.btn_zero_g92.hide()
-            self.widgets.btn_block_height.show()
-            self._replace_list_item(4, "btn_zero_g92", "btn_block_height")
+        # if no system is selected we will set the button not sensitive
+        system, name = self.widgets.offsetpage1.get_selected()
+        if not system:
+            self.touch_button_dic["set_active"].set_sensitive(False)
 
         if not state:  # we must switch back to manual mode, otherwise jogging is not possible
             self.command.mode(linuxcnc.MODE_MANUAL)
@@ -4224,6 +4304,12 @@ class gmoccapy(object):
         self.homed_color = self.prefs.getpref("homed_color", "green", str)
         self.unhomed_color = self.prefs.getpref("unhomed_color", "red", str)
 
+    def on_chk_hide_tooltips_toggled(self, widget, data=None):
+        print("hide tooltips toggled")
+        self.hide_tooltips = widget.get_active()
+        self.prefs.putpref("hide_tooltips", self.hide_tooltips)
+        self._set_enable_tooltips(not self.hide_tooltips)
+
     def on_rel_colorbutton_color_set(self, widget):
         color = widget.get_color()
         self.prefs.putpref('rel_color', color)
@@ -4270,19 +4356,23 @@ class gmoccapy(object):
         self.prefs.putpref("log_actions", widget.get_active())
 
     def on_chk_show_dro_toggled(self, widget, data=None):
+        state = widget.get_active()
         self.widgets.gremlin.set_property("metric_units", self.dro_dic["Combi_DRO_0"].metric_units)
-        self.widgets.gremlin.set_property("enable_dro", widget.get_active())
-        self.prefs.putpref("enable_dro", widget.get_active())
-        self.widgets.chk_show_offsets.set_sensitive(widget.get_active())
-        self.widgets.chk_show_dtg.set_sensitive(widget.get_active())
+        self.widgets.gremlin.set_property("enable_dro", state)
+        self.prefs.putpref("enable_dro", state)
+        self.enable_gremlin_dro = state
+        self.widgets.chk_show_offsets.set_sensitive(state)
+        self.widgets.chk_show_dtg.set_sensitive(state)
 
     def on_chk_show_dtg_toggled(self, widget, data=None):
-        self.widgets.gremlin.set_property("show_dtg", widget.get_active())
-        self.prefs.putpref("show_dtg", widget.get_active())
+        state = widget.get_active()
+        self.widgets.gremlin.set_property("show_dtg", state)
+        self.prefs.putpref("show_dtg", state)
 
     def on_chk_show_offsets_toggled(self, widget, data=None):
-        self.widgets.gremlin.show_offsets = widget.get_active()
-        self.prefs.putpref("show_offsets", widget.get_active())
+        state = widget.get_active()
+        self.widgets.gremlin.show_offsets = state
+        self.prefs.putpref("show_offsets", state)
 
     def on_cmb_mouse_button_mode_changed(self, widget):
         index = widget.get_active()
@@ -4515,7 +4605,6 @@ class gmoccapy(object):
         self.widgets.ntb_button.set_current_page(_BB_LOAD_FILE)
         self.widgets.ntb_preview.set_current_page(3)
         self.widgets.tbtn_fullsize_preview0.set_active(True)
-#        self.widgets.tbtn_fullsize_preview1.set_active(True)
         self._show_iconview_tab(True)
         self.widgets.IconFileSelection1.refresh_filelist()
         self.widgets.IconFileSelection1.iconView.grab_focus()
@@ -4552,6 +4641,7 @@ class gmoccapy(object):
         self.widgets[buttonname].set_sensitive(state)
 
     def on_IconFileSelection1_exit(self, widget):
+        print("exit icon file selection")
         self.widgets.ntb_preview.set_current_page(0)
         self.widgets.tbtn_fullsize_preview0.set_active(False)
 #        self.widgets.tbtn_fullsize_preview1.set_active(False)
@@ -4579,6 +4669,11 @@ class gmoccapy(object):
             self.widgets.box_info.set_size_request(-1, 50)
         self.widgets.tbl_search.show()
         self.gcodeerror = ""
+        self.file_changed = False
+
+    def on_gcode_view_changed(self, state):
+        print("gcode view changed")
+        self.file_changed = True
 
     # Search and replace handling in edit mode
     # undo changes while in edit mode
@@ -4611,6 +4706,7 @@ class gmoccapy(object):
 
     # if we leave the edit mode, we will have to show all widgets again
     def on_ntb_button_switch_page(self, *args):
+        print("ntb_button_switch_page")
         if self.widgets.ntb_preview.get_current_page() == 0:  # preview tab is active,
             # check if offset tab is visible, if so we have to hide it
             page = self.widgets.ntb_preview.get_nth_page(1)
@@ -4623,14 +4719,14 @@ class gmoccapy(object):
         elif self.widgets.ntb_preview.get_current_page() == 3:
             self._show_iconview_tab(False)
 
-#        if self.widgets.tbtn_fullsize_preview0.get_active() or self.widgets.tbtn_fullsize_preview1.get_active():
-#            self.widgets.tbtn_fullsize_preview0.set_active(False)
-#            self.widgets.tbtn_fullsize_preview1.set_active(False)
-        if self.widgets.ntb_button.get_current_page() == _BB_EDIT or self.widgets.ntb_preview.get_current_page() == _BB_HOME:
+        if self.widgets.ntb_button.get_current_page()  == _BB_EDIT or \
+           self.widgets.ntb_preview.get_current_page() == _BB_HOME or \
+           self.widgets.ntb_preview.get_current_page() == _BB_LOAD_FILE:
+            print("we are in special case")
             self.widgets.ntb_preview.show()
             self.widgets.tbl_DRO.show()
             self.widgets.vbx_jog.set_size_request(360, -1)
-            self.widgets.gcode_view.set_sensitive(0)
+            self.widgets.gcode_view.set_sensitive(False)
             self.widgets.btn_save.set_sensitive(True)
             self.widgets.hal_action_reload.emit("activate")
             self.widgets.ntb_info.set_current_page(0)
@@ -4792,7 +4888,7 @@ class gmoccapy(object):
         # widget can also be spc_lin_jog_vel and spc_rapid
         self.widgets[widget].hide_button(pin.get())
         
-        if pin.get():
+        if pin.get() and widget == "spc_lin_jog_vel":
             # special case of jog_vel, as we have to take care of both modes,
             # more details see _on_analog_value_changed
             if self.widgets.tbtn_turtle_jog.get_active():

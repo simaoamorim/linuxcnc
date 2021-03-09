@@ -44,6 +44,8 @@ class Pages:
         debug = self.a.debugstate
         global dbg
         dbg = self.a.dbg
+        # can only save data after selecting a config name
+        self.savable_flag = False
 
 #********************
 # Notebook Controls
@@ -58,9 +60,17 @@ class Pages:
         self.a.print_image('map_7i76')
     def on_print_7i77_button_clicked(self,widget):
         self.a.print_image('map_7i77')
+    def on_button_save_clicked(self, widget):
+        self.a.save()
 
     def on_window1_destroy(self, *args):
-        if self.a.warning_dialog (self._p.MESS_ABORT,False):
+        if self.savable_flag:
+            if self.a.quit_dialog():
+                gtk.main_quit()
+                return True
+            else:
+                return True
+        elif self.a.warning_dialog(self._p.MESS_QUIT,False):
             gtk.main_quit()
             return True
         else:
@@ -195,6 +205,7 @@ class Pages:
         self.w.xencoderscale.realize()
         self.a.origbg = self.w.xencoderscale.style.bg[gtk.STATE_NORMAL]
         self.w.window1.set_geometry_hints(min_width=750)
+        self.w.button_save.set_visible(False)
 
 #************
 # INTRO PAGE
@@ -210,6 +221,7 @@ class Pages:
     def start_prepare(self):
         self.d.help = "help-load.txt"
         # search for firmware packages
+        self.w.button_save.set_visible(False)
 
     def start_finish(self):
 
@@ -219,10 +231,12 @@ class Pages:
             state = True
         else:
             state = False
+        self.w.input_tab.set_visible(state)
         self.d.advanced_option = state
         self.page_set_state(['options','external','realtime'],state)
         self.d.createsymlink = self.w.createsymlink.get_active()
         self.d.createshortcut = self.w.createshortcut.get_active()
+        self.d.useinisubstitution = self.w.useinisubstitution.get_active()
         self.w.window1.set_title(_("Point and click configuration - %s.pncconf ") % self.d.machinename)
         self.a.add_external_folder_boardnames()
         # here we initialise the mesa configure page data
@@ -239,6 +253,7 @@ class Pages:
         self.d.help = "help-basic.txt"
         self.w.machinename.set_text(self.d.machinename)
         self.w.axes.set_active(self.d.axes)
+        self.w.include_spindle_checkbutton.set_active(self.d.include_spindle)
         self.w.units.set_active(self.d.units)
         self.w.servoperiod.set_value(self.d.servoperiod)
         self.w.machinename.grab_focus()
@@ -267,6 +282,8 @@ class Pages:
         self.w.raise_z_on_toolchange.set_active(self.d.raise_z_on_toolchange) 
         self.w.allow_spindle_on_toolchange.set_active(self.d.allow_spindle_on_toolchange)
         self.w.toolchangeprompt.set_active(self.d.toolchangeprompt)
+        #self.w.button_save.set_visible(True)
+        self.savable_flag = True
 
     def base_finish(self):
         machinename = self.w.machinename.get_text()
@@ -276,6 +293,7 @@ class Pages:
         if self.d.axes == 0: self.d.available_axes = ['x','y','z','s']
         elif self.d.axes == 1: self.d.available_axes = ['x','y','z','a','s']
         elif self.d.axes == 2: self.d.available_axes = ['x','z','s']
+        self.d.include_spindle = self.w.include_spindle_checkbutton.get_active()
         self.d.units = self.w.units.get_active()
         self.d.servoperiod = self.w.servoperiod.get_value()
         self.page_set_state('mesa1',self.w.mesa1_checkbutton.get_active())
@@ -286,6 +304,8 @@ class Pages:
                 state = True
             self.page_set_state('%s_axis'%let,state)
             self.page_set_state('%s_motor'%let,state)
+            self.page_set_state('s_axis',self.d.include_spindle)
+            self.page_set_state('s_motor',self.d.include_spindle)
         i = self.w.mesa0_checkbutton.get_active()
         j = self.w.mesa1_checkbutton.get_active()
         self.d.number_mesa = int(i)+int(j)
@@ -1024,15 +1044,17 @@ class Pages:
             self.d[p] = signal
             self.d[pinv] = invert
         self.d.pp1_direction = self.w.pp1_direction.get_active()
+        print '** pport** ',self.d.pp1_direction
         self.d.ioaddr1 = self.w.ioaddr1.get_text()
         self.page_set_state('s_motor',self.a.has_spindle_speed_control())
 
     # pport1 callbacks:
+    # adjust available pins based on pp1_direction (1 is output 0 input)
     def on_pp1_direction_changed(self,widget):
         state = widget.get_active()
         for i in (2,3,4,5,6,7,8,9):
-            self.w['pp1_Ipin%s_in_box'%i].set_visible(state)
-            self.w['pp1_Opin%s_out_box'%i].set_visible(not state)
+            self.w['pp1_Ipin%s_in_box'%i].set_visible(not state)
+            self.w['pp1_Opin%s_out_box'%i].set_visible(state)
 
     def on_pport_panel_clicked(self, *args):self.t.parporttest(self)
 
@@ -1114,11 +1136,12 @@ class Pages:
         self.page_set_state('s_motor',self.a.has_spindle_speed_control())
 
     # pport2 callbacks:
+    # adjust available pins based on pp2_direction (1 is output 0 input)
     def on_pp2_direction_changed(self,widget):
         state = widget.get_active()
         for i in (2,3,4,5,6,7,8,9):
-            self.w['pp2_Ipin%s_in_box'%i].set_visible(state)
-            self.w['pp2_Opin%s_out_box'%i].set_visible(not state)
+            self.w['pp2_Ipin%s_in_box'%i].set_visible(not state)
+            self.w['pp2_Opin%s_out_box'%i].set_visible(state)
 
     def on_parportpanel_clicked(self, *args):self.t.parporttest(self)
 #************
@@ -1192,6 +1215,7 @@ class Pages:
 #************
     def z_axis_prepare(self):
         self.d.help = "help-axisconfig.txt"
+        self.savable_flag = True
     def z_axis_finish(self):
         self.a.axis_done('z')
 #************
@@ -1216,6 +1240,7 @@ class Pages:
 #************
     def a_axis_prepare(self):
         self.d.help = "help-axisconfig.txt"
+        self.savable_flag = True
     def a_axis_finish(self):
         self.a.axis_done('a')
 #************
@@ -1284,7 +1309,7 @@ class Pages:
                     self.d.ladderhaltype = 0
             if self.w.ladder1.get_active() == True:
                 self.d.laddername = 'estop.clp'
-                has_estop = self.d.findsignal("estop-ext")
+                has_estop = self.a.findsignal("estop-ext")
                 if not has_estop:
                     self.a.warning_dialog(_("You need to designate an E-stop input pin for this ladder program."),True)
                     return True
@@ -1295,7 +1320,7 @@ class Pages:
                 self.w.modbus.set_active(self.d.modbus) 
                 self.d.ladderhaltype = 0
             if self.w.laddertouchz.get_active() == True:
-                has_probe = self.d.findsignal("probe-in")
+                has_probe = self.a.findsignal("probe-in")
                 if not has_probe:
                     self.a.warning_dialog(_("You need to designate a probe input pin for this ladder program."),True)
                     return True
@@ -1346,6 +1371,7 @@ different program to copy to your configuration file.\nThe edited program will b
                 if i == '': continue
                 textbuffer.insert_at_cursor(i+"\n" )
             self.d._components_is_prepared = True
+        self.savable_flag = True
 
     def realtime_finish(self):
         self.d.userneededpid = int(self.w.userneededpid.get_value())
@@ -1386,6 +1412,8 @@ different program to copy to your configuration file.\nThe edited program will b
     def finished_finish(self):
         self.a.clean_unused_ports()
         self.a.buid_config()
+        self.savable_flag = False
+
 #**************
 # tune test
 #**************
@@ -1422,6 +1450,11 @@ different program to copy to your configuration file.\nThe edited program will b
         self.t.oloop_resetencoder(1)
     def on_resetbutton_released(self, w):
         self.t.oloop_resetencoder(0)
+######################
+# mesa_discovery interface dialog
+######################
+    def on_discovery_interface_combobox_changed(self,w):
+        self.a.discovery_interface_combobox_changed(w)
 
 # BOILER CODE
     def __getitem__(self, item):

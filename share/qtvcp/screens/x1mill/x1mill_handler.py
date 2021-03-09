@@ -99,15 +99,12 @@ class HandlerClass:
                     event.accept()
                     return True
 
-        # ok if we got here then try keybindings
-        try:
-            return KEYBIND.call(self,event,is_pressed,shift,cntrl)
-        except NameError as e:
-            LOG.debug('Exception in KEYBINDING: {}'.format (e))
-        except Exception as e:
-            LOG.debug('Exception in KEYBINDING:', exc_info=e)
-            print 'Error in, or no function for: %s in handler file for-%s'%(KEYBIND.convert(event),key)
-            return False
+        if event.isAutoRepeat():return True
+
+        # ok if we got here then try keybindings function calls
+        # KEYBINDING will call functions from handler file as
+        # registered by KEYBIND.add_call(KEY,FUNCTION) above
+        return KEYBIND.manage_function_calls(self,event,is_pressed,key,shift,cntrl)
 
     ########################
     # callbacks from STATUS #
@@ -152,7 +149,7 @@ class HandlerClass:
         mess = {'NAME':'CALCULATOR','ID':'_RunFromLine_',
              'PRELOAD':self.picked_line,
                'TITLE':'Run From Line Dialog'}
-        STATUS.emit('dialog-request', mess)
+        ACTION.CALL_DIALOG('dialog-request', mess)
 
     #####################
     # general functions #
@@ -198,7 +195,7 @@ class HandlerClass:
             if STATUS.stat.interp_state == linuxcnc.INTERP_IDLE:
                 self.w.close()
             else:
-                self.cmnd.abort()
+                ACTION.ABORT()
 
     # Linear Jogging
     def on_keycall_XPOS(self,event,state,shift,cntrl):

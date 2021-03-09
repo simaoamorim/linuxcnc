@@ -28,13 +28,13 @@ from PyQt5.QtWidgets import QDesktopWidget
 import logger
 LOG = logger.getLogger(__name__)
 # Set the log level for this module
-#LOG.setLevel(logger.DEBUG) # One of DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG.setLevel(logger.INFO) # One of DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 class QTPanel():
     def __init__(self,halcomp,path,window,debug):
         xmlname = path.XML
         self.window = window
-        window['PREFS_'] = None
+        self.window['PREFS_'] = None
         self._screenOptions = None
         self._geo_string = ''
 
@@ -42,24 +42,34 @@ class QTPanel():
         # if is is then initiate the preference file
         # and pass a preference object to the window
         # it's then available to all HALified objects
+        # also allow screenoptions to inject data into
+        # our main window object -Ie reference to Notify lib
         # we must do this first of course
         for widget in window.findChildren(QObject):
             if isinstance(widget, _HalWidgetBase):
                 if isinstance(widget, ScreenOptions):
                     self._screenOptions = widget
                     try:
-                        window['PREFS_'], pref_fn = widget._pref_init()
-                    except:
-                        window['PREFS_'], pref_fn = (None,None)
+                        self.window['PREFS_'], pref_fn = widget._pref_init()
+                    except Exception as e:
+                        LOG.warning('Preference instance error: {}'.format(e))
+                        self.window['PREFS_'], pref_fn = (None,None)
                     path.PREFS_FILENAME = pref_fn
+                    try:
+                        widget._VCPObject_injection(window)
+                    except Exception as e:
+                        LOG.warning('VCPObject Injection error: {}'.format(e))
+
         # parse for HAL objects:
         # initiate the hal function on each
+        # keep a register list of these widgets for later
         LOG.debug('QTVCP: Parcing for hal widgets')
         for widget in window.findChildren(QObject):
             if isinstance(widget, _HalWidgetBase):
+                self.window.registerHalWidget(widget)
                 idname = widget.objectName()
                 LOG.debug('HAL-ified instance found: {}'.format(idname))
-                widget.hal_init(halcomp, str(idname), widget, window, window. PATHS, window['PREFS_'])
+                widget.hal_init()
 
     # Search all hal-ifed widgets for closing clean up functions and call them
     # used for such things as preference recording current settings
@@ -67,17 +77,17 @@ class QTPanel():
         if self.window['PREFS_']:
             self.record_preference_geometry()
         LOG.debug('search for widget closing cleanup functions')
-        for widget in self.window.findChildren(QObject):
-            if isinstance(widget, _HalWidgetBase):
-                if 'closing_cleanup__' in dir(widget):
-                    idname = widget.objectName()
-                    LOG.debug('Closing cleanup on: {}'.format(idname))
-                    widget.closing_cleanup__()
+        for widget in self.window.getRegisteredHalWidgetList():
+            if 'closing_cleanup__' in dir(widget):
+                idname = widget.objectName()
+                LOG.info('Closing cleanup on: {}'.format(idname))
+                widget.closing_cleanup__()
 
     # if there is a prefrence file and it is has digits (so no key word), then record
     # the window geometry
     def record_preference_geometry(self):
         temp = self._geo_string.replace(' ','')
+        temp = temp.strip('-')
         if temp == '' or temp.isdigit():
             LOG.debug('Saving Main Window geometry to preference file.')
             x = self.window.geometry().x()
@@ -93,7 +103,7 @@ class QTPanel():
         if self.window['PREFS_']:
             self.geometry_parsing()
         else:
-            LOG.debug('No preference file - can not set preference geometry.')
+            LOG.info('No preference file - can not set preference geometry.')
 
     def geometry_parsing(self):
         def go(x,y,w,h):

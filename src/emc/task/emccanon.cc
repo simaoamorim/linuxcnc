@@ -42,6 +42,7 @@
 #include "canon_position.hh"		// data type for a machine position
 #include "interpl.hh"		// interp_list
 #include "emcglb.h"		// TRAJ_MAX_VELOCITY
+#include <rtapi_string.h>
 
 //#define EMCCANON_DEBUG
 
@@ -68,7 +69,6 @@
 static CanonConfig_t canon;
 
 static int debug_velacc = 0;
-static const double tiny = 1e-7;
 
 #ifndef MIN
 #define MIN(a,b) ((a)<(b)?(a):(b))
@@ -852,6 +852,10 @@ struct pt { double x, y, z, a, b, c, u, v, w; int line_no;};
 
 static std::vector<struct pt> chained_points;
 
+static void drop_segments(void) {
+    chained_points.clear();
+}
+
 static void flush_segments(void) {
     if(chained_points.empty()) return;
 
@@ -917,7 +921,7 @@ static void flush_segments(void) {
     }
     canonUpdateEndPoint(x, y, z, a, b, c, u, v, w);
 
-    chained_points.clear();
+    drop_segments();
 }
 
 static void get_last_pos(double &lx, double &ly, double &lz) {
@@ -995,6 +999,11 @@ see_segment(int line_number,
 void FINISH() {
     flush_segments();
 }
+
+void ON_RESET() {
+    drop_segments();
+}
+
 
 void STRAIGHT_TRAVERSE(int line_number,
                        double x, double y, double z,
@@ -1457,7 +1466,7 @@ void ARC_FEED(int line_number,
     if( canon.activePlane == CANON_PLANE_XY && canon.motionMode == CANON_CONTINUOUS) {
         double mx, my;
         double lx, ly, lz;
-        double unused;
+        double unused = 0;
 
         get_last_pos(lx, ly, lz);
 
@@ -2096,12 +2105,11 @@ void CHANGE_TOOL(int slot)
     interp_list.append(load_tool_msg);
 }
 
-/* SELECT_POCKET results from Tn */
-void SELECT_POCKET(int slot , int tool)
+/* SELECT_TOOL results from Tn */
+void SELECT_TOOL(int tool)
 {
     EMC_TOOL_PREPARE prep_for_tool_msg;
 
-    prep_for_tool_msg.pocket = slot;
     prep_for_tool_msg.tool = tool;
 
     interp_list.append(prep_for_tool_msg);
@@ -2610,7 +2618,7 @@ CANON_POSITION GET_EXTERNAL_POSITION()
     CANON_POSITION position;
     EmcPose pos;
 
-    chained_points.clear();
+    drop_segments();
 
     pos = emcStatus->motion.traj.position;
 
@@ -2967,6 +2975,8 @@ int GET_EXTERNAL_TOOL_SLOT()
 {
     int toolno = emcStatus->io.tool.toolInSpindle;
     int pocket;
+
+    if (toolno == -1) {return -1;} // detect request for invalid tool
 
     for (pocket = 1; pocket < CANON_POCKETS_MAX; pocket++) {
         if (emcStatus->io.tool.toolTable[pocket].toolno == toolno) {

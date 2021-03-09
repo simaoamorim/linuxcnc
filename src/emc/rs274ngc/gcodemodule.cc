@@ -410,8 +410,9 @@ void WAIT_SPINDLE_ORIENT_COMPLETE(int s, double timeout) {}
 void PROGRAM_STOP() {}
 void PROGRAM_END() {}
 void FINISH() {}
+void ON_RESET() {}
 void PALLET_SHUTTLE() {}
-void SELECT_POCKET(int pocket, int tool) {}
+void SELECT_TOOL(int tool) {}
 void OPTIONAL_PROGRAM_STOP() {}
 void START_CHANGE() {}
 int  GET_EXTERNAL_TC_FAULT() {return 0;}

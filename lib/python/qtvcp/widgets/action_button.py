@@ -51,22 +51,34 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         self.estop = False
         self.machine_on = False
         self.home = False
+        self.unhome = False
+        self.home_select = False
+        self.unhome_select = False
         self.run = False
+        self.run_from_status = False
+        self.run_from_slot = False
         self.abort = False
         self.pause = False
+        self.step = False
         self.load_dialog = False
         self.macro_dialog = False
         self.origin_offset_dialog = False
+        self.tool_offset_dialog = False
         self.camview_dialog = False
+        self.machine_log_dialog = False
         self.jog_joint_pos = False
         self.jog_joint_neg = False
         self.jog_selected_pos = False
         self.jog_selected_neg = False
         self.zero_axis = False
+        self.zero_g5x = False
+        self.zero_g92 = False
+        self.zero_zrot = False
         self.launch_halmeter = False
         self.launch_status = False
         self.launch_halshow = False
         self.launch_halscope = False
+        self.launch_calibration = False
         self.mdi = False
         self.auto = False
         self.manual = False
@@ -109,6 +121,7 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         self.ini_mdi_num = 0
         self._textTemplate = '%1.3f in'
         self._alt_textTemplate = '%1.2f mm'
+        self._run_from_line_int = 0
 
     ##################################################
     # This gets called by qtvcp_makepins
@@ -131,7 +144,8 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         def _safecheck(state, data=None):
             self._block_signal = True
             self.setChecked(state)
-            if self._HAL_pin is False:
+            # update indicator if halpin or status doesn't
+            if self._HAL_pin is False and self._ind_status is False:
                 self.indicator_update(state)
             # if using state labels option update the labels
             if self._state_text:
@@ -159,6 +173,28 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         def homed_on_test():
             return (STATUS.machine_is_on()
                     and (STATUS.is_all_homed() or INFO.NO_HOME_REQUIRED))
+
+        def limits_override_test(data):
+            if STATUS.is_homing():
+                return
+            elif data:
+                self.setEnabled(True)
+            else:
+                self.setEnabled(False)
+                self.setChecked(False)
+                ACTION.TOGGLE_LIMITS_OVERRIDE()
+
+        def spindle_control_test(e,d):
+            if self.spindle_fwd:
+                if d in(0,-1):
+                    _safecheck(False)
+                    return
+            else:
+                if d in(0,1):
+                    _safecheck(False)
+                    return
+            _safecheck(True)
+
         if self.estop:
             # Estop starts with button down - in estop which
             # backwards logic for the button...
@@ -166,14 +202,14 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             STATUS.connect('state-estop', lambda w: _safecheck(True))
             STATUS.connect('state-estop-reset', lambda w: _safecheck(False))
 
-        elif self.machine_on:
+        elif self.machine_on or self.abort:
             #self.setEnabled(False)
             STATUS.connect('state-estop', lambda w: self.setEnabled(False))
             STATUS.connect('state-estop-reset', lambda w: self.setEnabled(True))
             STATUS.connect('state-on', lambda w: _safecheck(True))
             STATUS.connect('state-off', lambda w: _safecheck(False))
 
-        elif self.home:
+        elif True in(self.home, self.unhome, self.home_select, self.unhome_select):
             #self.setEnabled(False)
             STATUS.connect('state-off', lambda w: self.setEnabled(False))
             STATUS.connect('state-estop', lambda w: self.setEnabled(False))
@@ -189,7 +225,8 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             STATUS.connect('interp-run', lambda w: self.setEnabled(False))
             STATUS.connect('all-homed', lambda w: _safecheck(True))
 
-        elif self.camview_dialog or self.macro_dialog or self.origin_offset_dialog:
+        elif self.camview_dialog or self.macro_dialog or self.origin_offset_dialog or \
+                self.tool_offset_dialog:
             pass
         elif self.jog_joint_pos or self.jog_joint_neg or \
                     self.jog_selected_pos or self.jog_selected_neg:
@@ -214,7 +251,8 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             # leave early to aviod the standard 'clicked' signal
             return
 
-        elif self.zero_axis or self.run:
+        elif True in(self.zero_axis, self.zero_g5x,self.zero_g92, self.run, self.zero_zrot,
+                    self.run_from_status, self.run_from_slot):
             STATUS.connect('state-off', lambda w: self.setEnabled(False))
             STATUS.connect('state-estop', lambda w: self.setEnabled(False))
             STATUS.connect('interp-idle', lambda w: self.setEnabled(homed_on_test()))
@@ -222,17 +260,19 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             STATUS.connect('all-homed', lambda w: self.setEnabled(True))
             STATUS.connect('not-all-homed', lambda w, data: self.setEnabled(False))
             STATUS.connect('interp-paused', lambda w: self.setEnabled(True))
-            if self.run:
+            if True in (self.run, self.run_from_status, self.run_from_slot):
                 STATUS.connect('file-loaded', lambda w, f: self.setEnabled(True))
+            if self.run_from_status:
+                STATUS.connect('gcode-line-selected', lambda w, line: self.updateRunFromLine(line))
 
-        elif self.abort or self.pause:
+        elif True in(self.pause, self.step):
             self.setEnabled(False)
             if self.pause:
                 STATUS.connect('program-pause-changed', lambda w, state: _safecheck(state))
             STATUS.connect('state-off', lambda w: self.setEnabled(False))
             STATUS.connect('state-estop', lambda w: self.setEnabled(False))
-            STATUS.connect('interp-idle', lambda w: self.setEnabled(homed_on_loaded_test()))
-            STATUS.connect('all-homed', lambda w: self.setEnabled(True))
+            STATUS.connect('interp-run', lambda w: self.setEnabled(homed_on_test()))
+            STATUS.connect('interp-idle', lambda w: self.setEnabled(False))
 
         elif self.launch_halmeter:
             pass
@@ -241,6 +281,8 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         elif self.launch_halshow:
             pass
         elif self.launch_halscope:
+            pass
+        elif self.launch_calibration:
             pass
         elif self.auto:
             STATUS.connect('mode-auto', lambda w: _safecheck(True))
@@ -261,27 +303,29 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         elif self.feed_over or self.rapid_over or self.spindle_over or self.jog_rate or \
             self.max_velocity_over:
             STATUS.connect('state-estop', lambda w: self.setEnabled(False))
-            STATUS.connect('state-estop-reset', lambda w: self.setEnabled(STATUS.machine_is_on()))
+            STATUS.connect('state-estop-reset', lambda w: self.setEnabled(True))
             STATUS.connect('state-on', lambda w: _safecheck(True))
             STATUS.connect('state-off', lambda w: _safecheck(False))
         elif self.view_change:
             pass
         elif self.spindle_fwd or self.spindle_rev or self.spindle_up or self.spindle_down:
-            STATUS.connect('mode-manual', lambda w: _safecheck(True))
-            STATUS.connect('mode-mdi', lambda w: _safecheck(False))
-            STATUS.connect('mode-auto', lambda w: _safecheck(False))
+            STATUS.connect('mode-manual', lambda w: self.setEnabled(True))
+            STATUS.connect('mode-mdi', lambda w: self.setEnabled(False))
+            STATUS.connect('mode-auto', lambda w: self.setEnabled(False))
             STATUS.connect('state-off', lambda w: self.setEnabled(False))
             STATUS.connect('state-estop', lambda w: self.setEnabled(False))
             STATUS.connect('state-on', lambda w: self.setEnabled(True))
+            if self.spindle_fwd or self.spindle_rev:
+                STATUS.connect('spindle-control-changed', lambda w, e, d: spindle_control_test(e,d))
         elif self.spindle_stop:
             STATUS.connect('mode-auto', lambda w: self.setEnabled(False))
             STATUS.connect('state-off', lambda w: self.setEnabled(False))
             STATUS.connect('state-estop', lambda w: self.setEnabled(False))
             STATUS.connect('spindle-control-changed', lambda w, e, d: self.setEnabled(e and not STATUS.is_auto_mode()))
-            STATUS.connect('spindle-control-changed', lambda w, e, d: _safecheck(not e))
-
         elif self.limits_override:
-            STATUS.connect('hard-limits-tripped', lambda w, data, group: self.setEnabled(data))
+            self.setEnabled(False)
+            #STATUS.connect('override-limits-changed', lambda w, data, group: limits_override_test(data))
+            STATUS.connect('hard-limits-tripped', lambda w, data, group: limits_override_test(data))
         elif self.flood:
             STATUS.connect('state-estop', lambda w: self.setEnabled(False))
             STATUS.connect('state-on', lambda w: self.setEnabled(True))
@@ -313,7 +357,7 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             STATUS.connect('all-homed', lambda w: self.setEnabled(True))
         elif self.dro_absolute or self.dro_relative or self.dro_dtg:
             pass
-        elif self.exit:
+        elif True in(self.exit, self.machine_log_dialog):
             pass
 
         # connect a signal and callback function to the button
@@ -321,6 +365,17 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             self.clicked[bool].connect(self.action)
         else:
             self.pressed.connect(self.action)
+
+    def safecheck(self, state):
+        self._block_signal = True
+        self.setChecked(state)
+        # update indicator if halpin or status doesn't
+        if self._HAL_pin is False and self._ind_status is False:
+            self.indicator_update(state)
+        # if using state labels option update the labels
+        if self._state_text:
+            self.setText(None)
+        self._block_signal = False
 
     ###################################
     # Here we do the actions
@@ -346,24 +401,41 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
                 else:
                     ACTION.SET_MACHINE_UNHOMED(self.joint)
             else:
-                if STATUS.is_all_homed():
+                if self.joint == -1:
+                    if STATUS.is_all_homed():
+                        ACTION.SET_MACHINE_UNHOMED(-1)
+                    else:
+                        ACTION.SET_MACHINE_HOMING(-1)
+                elif STATUS.is_joint_homed(self.joint):
                     ACTION.SET_MACHINE_UNHOMED(self.joint)
                 else:
                     ACTION.SET_MACHINE_HOMING(self.joint)
+        elif self.unhome:
+            ACTION.SET_MACHINE_UNHOMED(self.joint)
+        elif self.home_select:
+            ACTION.SET_MACHINE_HOMING(STATUS.get_selected_joint())
+        elif self.unhome_select:
+            ACTION.SET_MACHINE_UNHOMED(STATUS.get_selected_joint())
         elif self.run:
             ACTION.RUN()
+        elif True in(self.run_from_status, self.run_from_slot):
+            ACTION.RUN(line = self._run_from_line_int)
         elif self.abort:
             ACTION.ABORT()
         elif self.pause:
             ACTION.PAUSE()
+        elif self.step:
+            ACTION.STEP()
         elif self.load_dialog:
-            STATUS.emit('dialog-request',{'NAME':'LOAD'})
+            STATUS.emit('dialog-request',{'NAME':'LOAD', 'ID':None})
         elif self.camview_dialog:
-            STATUS.emit('dialog-request', {'NAME':'CAMVIEW'})
+            STATUS.emit('dialog-request', {'NAME':'CAMVIEW', 'ID':'_%s_'% self.objectName()})
         elif self.macro_dialog:
-            STATUS.emit('dialog-request', {'NAME':'MACRO'})
+            STATUS.emit('dialog-request', {'NAME':'MACRO', 'ID':'_%s_'% self.objectName()})
         elif self.origin_offset_dialog:
-            STATUS.emit('dialog-request', {'NAME':'ORIGINOFFSET'})
+            STATUS.emit('dialog-request', {'NAME':'ORIGINOFFSET', 'ID':'_%s_'% self.objectName()})
+        elif self.tool_offset_dialog:
+            STATUS.emit('dialog-request', {'NAME':'TOOLOFFSET', 'ID':'_%s_'% self.objectName()})
         elif self.zero_axis:
             j = "XYZABCUVW"
             try:
@@ -371,6 +443,12 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             except IndexError:
                 LOG.error("can't zero origin for specified joint {}".format(self.joint))
             ACTION.SET_AXIS_ORIGIN(axis, 0)
+        elif self.zero_g5x:
+            ACTION.ZERO_G5X_OFFSET(0)
+        elif self.zero_g92:
+            ACTION.ZERO_G92_OFFSET()
+        elif self.zero_zrot:
+            ACTION.ZERO_ROTATIONAL_OFFSET()
         elif self.launch_halmeter:
             AUX_PRGM.load_halmeter()
         elif self.launch_status:
@@ -379,6 +457,8 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             AUX_PRGM.load_halshow()
         elif self.launch_halscope:
             AUX_PRGM.load_halscope()
+        elif self.launch_calibration:
+            AUX_PRGM.load_calibration()
         elif self.auto:
             ACTION.SET_AUTO_MODE()
         elif self.mdi:
@@ -417,34 +497,64 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             self._toggle_state = self._toggle_state * -1
         elif self.spindle_over:
             if self.toggle_float and not self._toggle_state:
-                ACTION.SET_SPINDLE_RATE(self.float_alt)
+                ACTION.SET_SPINDLE_RATE(self.float_alt,self.joint)
             else:
-                ACTION.SET_SPINDLE_RATE(self.float)
+                ACTION.SET_SPINDLE_RATE(self.float,self.joint)
             self._toggle_state -= 1
             self._toggle_state = self._toggle_state * -1
         elif self.view_change:
-            try:
-                STATUS.emit('graphics-view-changed', '%s' % self.view_type)
-            except:
-                pass
-        elif self.spindle_fwd:
-            ACTION.SET_SPINDLE_ROTATION(linuxcnc.SPINDLE_FORWARD, INFO.DEFAULT_SPINDLE_SPEED)
-        elif self.spindle_rev:
-            ACTION.SET_SPINDLE_ROTATION(linuxcnc.SPINDLE_REVERSE, INFO.DEFAULT_SPINDLE_SPEED)
+            if self.view_type =='reload':
+                 STATUS.emit('reload-display')
+            else:
+                try:
+                    ACTION.SET_GRAPHICS_VIEW(self.view_type)
+                except Exception as e:
+                    print e
+                    pass
+        elif True in (self.spindle_fwd, self.spindle_rev):
+            if self.spindle_fwd:
+                spindir = linuxcnc.SPINDLE_FORWARD
+            else:
+                spindir = linuxcnc.SPINDLE_REVERSE
+            if self.joint == -1:
+                a = 0
+                b = INFO.AVAILABLE_SPINDLES
+            else:
+                a = self.joint
+                b = self.joint +1
+            for i in range(a,b):
+                ACTION.SET_SPINDLE_ROTATION(spindir,
+                    INFO['DEFAULT_SPINDLE_{}_SPEED'.format(i)],i)
         elif self.spindle_stop:
-            ACTION.SET_SPINDLE_STOP()
+            ACTION.SET_SPINDLE_STOP(self.joint)
         elif self.spindle_up:
-            if STATUS.is_spindle_on():
-                ACTION.SET_SPINDLE_FASTER()
+            if self.joint == -1:
+                a = 0
+                b = INFO.AVAILABLE_SPINDLES
             else:
-                ACTION.SET_SPINDLE_ROTATION(linuxcnc.SPINDLE_FORWARD, INFO.DEFAULT_SPINDLE_SPEED)
+                a = self.joint
+                b = self.joint +1
+            for i in range(a,b):
+                if STATUS.is_spindle_on(i):
+                    ACTION.SET_SPINDLE_FASTER(i)
+                else:
+                    ACTION.SET_SPINDLE_ROTATION(linuxcnc.SPINDLE_FORWARD,
+                         INFO['DEFAULT_SPINDLE_{}_SPEED'.format(i)],i)
         elif self.spindle_down:
-            if STATUS.is_spindle_on():
-                ACTION.SET_SPINDLE_SLOWER()
+            if self.joint ==-1:
+                a = 0
+                b = INFO.AVAILABLE_SPINDLES
             else:
-                ACTION.SET_SPINDLE_ROTATION(linuxcnc.SPINDLE_REVERSE, INFO.DEFAULT_SPINDLE_SPEED)
+                a = self.joint
+                b = self.joint +1
+            for i in range(a,b):
+                if STATUS.is_spindle_on(i):
+                    ACTION.SET_SPINDLE_SLOWER(i)
+                else:
+                    ACTION.SET_SPINDLE_ROTATION(linuxcnc.SPINDLE_REVERSE,
+                         INFO['DEFAULT_SPINDLE_{}_SPEED'.format(i)],i)
         elif self.limits_override:
-            ACTION.SET_LIMITS_OVERRIDE()
+            ACTION.TOGGLE_LIMITS_OVERRIDE()
         elif self.flood:
             if self.isCheckable() is False:
                 ACTION.TOGGLE_FLOOD()
@@ -492,9 +602,15 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
             STATUS.emit('dro-reference-change-request', 2)
         elif self.exit:
             self.QTVCP_INSTANCE_.close()
+        elif self.machine_log_dialog:
+            STATUS.emit('dialog-request',{'NAME':'MACHINELOG', 'ID':'_%s_'% self.objectName()})
         # defult error case
-        elif not self._python_command:
-            LOG.error('No action recognised')
+        else:
+            if state is not None:
+                self.safecheck(state)
+            if not self._python_command:
+                LOG.error('No action recognised')
+
 
         # This is check after because action buttons can do an action plus
         # a python command, or just either one.
@@ -503,6 +619,16 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
                 state = not self._indicator_state
             self.python_command(state)
 
+    @QtCore.pyqtSlot(int,name='setRunFromLine')
+    def updateRunFromLine(self, data):
+        self._run_from_line_int = int(data)
+
+    @QtCore.pyqtSlot(str,name='setRunFromLine')
+    def updateRunFromLine(self, data):
+        try:
+            self._run_from_line_int = int(data)
+        except ValueError:
+            LOG.error("Value Error setting run from line")
 
     # If direction = 0 (button release) and distance is not 0, then we are
     # doing a jog increment so don't stop jog on release.
@@ -571,9 +697,9 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         ACTION.SET_JOG_INCR_ANGULAR(incr , text)
 
     def setText(self,data):
-        print 'set text:',data, self._designer_running
+        #print 'set text:',data, self._designer_running
         if self._designer_running:
-            print 'update'
+            #print 'update'
             self.set_textTemplate(data)
         super(ActionButton, self).setText(data)
 
@@ -595,7 +721,8 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
     ########################################################################
 
     def _toggle_properties(self, picked):
-        data = ('estop', 'machine_on', 'home', 'run', 'abort', 'pause',
+        data = ('estop', 'machine_on', 'home', 'unhome', 'home_select',
+                'unhome_select', 'run', 'abort', 'pause', 'step'
                 'load_dialog', 'jog_joint_pos', 'jog_joint_neg',
                 'jog_selected_pos', 'jog_selected_neg', 'zero_axis',
                 'launch_halmeter', 'launch_status', 'launch_halshow',
@@ -606,7 +733,9 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
                 'limits_override', 'flood', 'mist', 'optional_stop', 'mdi_command',
                 'ini_mdi_command', 'command_text', 'block_delete', 'dro_absolute',
                 'dro_relative', 'dro_dtg','max_velocity_over', 'launch_halscope',
-                 'exit')
+                'launch_calibration',
+                 'exit', 'machine_log_dialog', 'zero_g5x', 'zero_g92', 'zero_zrot',
+                 'origin_offset_dialog', 'run_from_status', 'run_from_slot')
 
         for i in data:
             if not i == picked:
@@ -640,6 +769,34 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
     def reset_home(self):
         self.home = False
 
+    def set_unhome(self, data):
+        self.unhome = data
+        if data:
+            self._toggle_properties('unhome')
+    def get_unhome(self):
+        return self.unhome
+    def reset_unhome(self):
+        self.unhome = False
+
+    def set_home_select(self, data):
+        self.home_select = data
+        if data:
+            self._toggle_properties('home_select')
+    def get_home_select(self):
+        return self.home_select
+    def reset_home_select(self):
+        self.home_select = False
+
+    def set_unhome_select(self, data):
+        self.unhome_select = data
+        if data:
+            self._toggle_properties('unhome_select')
+    def get_unhome_select(self):
+        return self.unhome_select
+    def reset_unhome_select(self):
+        self.unhome_select = False
+
+
     def set_zero_axis(self, data):
         self.zero_axis = data
         if data:
@@ -648,6 +805,33 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         return self.zero_axis
     def reset_zero_axis(self):
         self.zero_axis = False
+
+    def set_zero_g5x(self, data):
+        self.zero_g5x = data
+        if data:
+            self._toggle_properties('zero_g5x')
+    def get_zero_g5x(self):
+        return self.zero_g5x
+    def reset_zero_g5x(self):
+        self.zero_g5x = False
+
+    def set_zero_g92(self, data):
+        self.zero_g92 = data
+        if data:
+            self._toggle_properties('zero_g92')
+    def get_zero_g92(self):
+        return self.zero_g92
+    def reset_zero_g92(self):
+        self.zero_g92 = False
+
+    def set_zero_zrot(self, data):
+        self.zero_zrot = data
+        if data:
+            self._toggle_properties('zero_zrot')
+    def get_zero_zrot(self):
+        return self.zero_zrot
+    def reset_zero_zrot(self):
+        self.zero_zrot = False
 
     def set_load_dialog(self, data):
         self.load_dialog = data
@@ -675,6 +859,15 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         return self.origin_offset_dialog
     def reset_origin_offset_dialog(self):
         self.origin_offset_dialog = False
+
+    def set_tool_offset_dialog(self, data):
+        self.tool_offset_dialog = data
+        if data:
+            self._toggle_properties('tool_offset_dialog')
+    def get_tool_offset_dialog(self):
+        return self.tool_offset_dialog
+    def reset_tool_offset_dialog(self):
+        self.tool_offset_dialog = False
 
     def set_camview_dialog(self, data):
         self.camview_dialog = data
@@ -730,6 +923,25 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
     def reset_run(self):
         self.run = False
 
+    def set_run_from_status(self, data):
+        self.run_from_status = data
+        if data:
+            self._toggle_properties('run_from_status')
+    def get_run_from_status(self):
+        return self.run_from_status
+    def reset_run_from_status(self):
+        self.run_from_status = False
+
+    def set_run_from_slot(self, data):
+        self.run_from_slot = data
+        if data:
+            self._toggle_properties('run_from_slot')
+    def get_run_from_slot(self):
+        return self.run_from_slot
+    def reset_run_from_slot(self):
+        self.run_from_slot = False
+
+
     def set_abort(self, data):
         self.abort = data
         if data:
@@ -747,6 +959,15 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         return self.pause
     def reset_pause(self):
         self.pause = False
+
+    def set_step(self, data):
+        self.step = data
+        if data:
+            self._toggle_properties('step')
+    def get_step(self):
+        return self.step
+    def reset_step(self):
+        self.step = False
 
     def set_launch_halmeter(self, data):
         self.launch_halmeter = data
@@ -783,6 +1004,15 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         return self.launch_halscope
     def reset_launch_halscope(self):
         self.launch_halscope = False
+
+    def set_launch_calibration(self, data):
+        self.launch_calibration = data
+        if data:
+            self._toggle_properties('launch_calibration')
+    def get_launch_calibration(self):
+        return self.launch_calibration
+    def reset_launch_calibration(self):
+        self.launch_calibration = False
 
     def set_auto(self, data):
         self.auto = data
@@ -1031,6 +1261,15 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
     def reset_exit(self):
         self.exit = False
 
+    def set_machine_log_dialog(self, data):
+        self.machine_log_dialog = data
+        if data:
+            self._toggle_properties('machine_log_dialog')
+    def get_machine_log_dialog(self):
+        return self.machine_log_dialog
+    def reset_machine_log_dialog(self):
+        self.machine_log_dialog = False
+
     # NON BOOL VARIABLES------------------
     def set_incr_imperial(self, data):
         self.jog_incr_imperial = data
@@ -1080,7 +1319,7 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
         if not data.lower() in('x', 'y', 'y2', 'z', 'z2', 'p', 'clear',
                     'zoom-in','zoom-out','pan-up','pan-down',
                     'pan-left','pan-right','rotate-up','rotate-down',
-                    'rotate-cw','rotate-ccw'):
+                    'rotate-cw','rotate-ccw','reload'):
             data = 'p'
         self.view_type = data
     def get_view_type(self):
@@ -1110,21 +1349,34 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
     mdi_action = QtCore.pyqtProperty(bool, get_mdi, set_mdi, reset_mdi)
     manual_action = QtCore.pyqtProperty(bool, get_manual, set_manual, reset_manual)
     run_action = QtCore.pyqtProperty(bool, get_run, set_run, reset_run)
+    run_from_status_action = QtCore.pyqtProperty(bool, get_run_from_status, set_run_from_status, reset_run_from_status)
+    run_from_slot_action = QtCore.pyqtProperty(bool, get_run_from_slot, set_run_from_slot, reset_run_from_slot)
     abort_action = QtCore.pyqtProperty(bool, get_abort, set_abort, reset_abort)
     pause_action = QtCore.pyqtProperty(bool, get_pause, set_pause, reset_pause)
+    step_action = QtCore.pyqtProperty(bool, get_step, set_step, reset_step)
     load_dialog_action = QtCore.pyqtProperty(bool, get_load_dialog, set_load_dialog, reset_load_dialog)
     camview_dialog_action = QtCore.pyqtProperty(bool,
                                                 get_camview_dialog, set_camview_dialog, reset_camview_dialog)
     origin_offset_dialog_action = QtCore.pyqtProperty(bool,
                                                       get_origin_offset_dialog, set_origin_offset_dialog,
                                                       reset_origin_offset_dialog)
+    tool_offset_dialog_action = QtCore.pyqtProperty(bool,
+                                                      get_tool_offset_dialog, set_tool_offset_dialog,
+                                                      reset_tool_offset_dialog)
     macro_dialog_action = QtCore.pyqtProperty(bool, get_macro_dialog, set_macro_dialog, reset_macro_dialog)
     launch_halmeter_action = QtCore.pyqtProperty(bool, get_launch_halmeter, set_launch_halmeter, reset_launch_halmeter)
     launch_status_action = QtCore.pyqtProperty(bool, get_launch_status, set_launch_status, reset_launch_status)
     launch_halshow_action = QtCore.pyqtProperty(bool, get_launch_halshow, set_launch_halshow, reset_launch_halshow)
     launch_halscope_action = QtCore.pyqtProperty(bool, get_launch_halscope, set_launch_halscope, reset_launch_halscope)
+    launch_calibration_action = QtCore.pyqtProperty(bool, get_launch_calibration, set_launch_calibration, reset_launch_calibration)
     home_action = QtCore.pyqtProperty(bool, get_home, set_home, reset_home)
+    unhome_action = QtCore.pyqtProperty(bool, get_unhome, set_unhome, reset_unhome)
+    home_select_action = QtCore.pyqtProperty(bool, get_home_select, set_home_select, reset_home_select)
+    unhome_select_action = QtCore.pyqtProperty(bool, get_unhome_select, set_unhome_select, reset_unhome_select)
     zero_axis_action = QtCore.pyqtProperty(bool, get_zero_axis, set_zero_axis, reset_zero_axis)
+    zero_g5x_action = QtCore.pyqtProperty(bool, get_zero_g5x, set_zero_g5x, reset_zero_g5x)
+    zero_g92_action = QtCore.pyqtProperty(bool, get_zero_g92, set_zero_g92, reset_zero_g92)
+    zero_zrot_action = QtCore.pyqtProperty(bool, get_zero_zrot, set_zero_zrot, reset_zero_zrot)
     jog_joint_pos_action = QtCore.pyqtProperty(bool, get_jog_joint_pos, set_jog_joint_pos, reset_jog_joint_pos)
     jog_joint_neg_action = QtCore.pyqtProperty(bool, get_jog_joint_neg, set_jog_joint_neg, reset_jog_joint_neg)
     jog_selected_pos_action = QtCore.pyqtProperty(bool, get_jog_selected_pos, set_jog_selected_pos, reset_jog_selected_pos)
@@ -1152,6 +1404,7 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
     dro_relative_action = QtCore.pyqtProperty(bool, get_dro_relative, set_dro_relative, reset_dro_relative)
     dro_dtg_action = QtCore.pyqtProperty(bool, get_dro_dtg, set_dro_dtg, reset_dro_dtg)
     exit_action = QtCore.pyqtProperty(bool, get_exit, set_exit, reset_exit)
+    machine_log_dialog_action = QtCore.pyqtProperty(bool, get_machine_log_dialog, set_machine_log_dialog, reset_machine_log_dialog)
 
     def set_template_label(self, data):
         self.template_label = data
@@ -1203,11 +1456,16 @@ class ActionButton(Indicated_PushButton, _HalWidgetBase):
 if __name__ == "__main__":
 
     import sys
-    from PyQt4.QtGui import QApplication
+    from PyQt5.QtWidgets import QApplication
     app = QApplication(sys.argv)
 
     widget = ActionButton('Action')
     # this doesn't get called without qtvcp loading the widget
+    widget.HAL_NAME_ = 'test'
+    widget.PREFS_ = None
+    widget.QTVCP_INSTANCE_ = None
+    widget.draw_indicator = True
+    widget._indicator_state = True
     widget._hal_init()
 
     widget.show()
